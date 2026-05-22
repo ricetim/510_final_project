@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -51,6 +52,24 @@ OUTPUT_COLUMNS: list[str] = [
     "error",
     "run_id",
 ]
+
+
+def load_input_rows(path: str, limit: int | None) -> list[dict]:
+    """Read input CSV, validate schema, return rows as dicts."""
+    p = Path(path)
+    if not p.exists():
+        raise FileNotFoundError(f"Input CSV not found: {path}")
+    with p.open(newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        missing = [c for c in RESULT_INPUT_COLUMNS if c not in (reader.fieldnames or [])]
+        if missing:
+            raise ValueError(f"Input CSV missing required column(s): {missing}")
+        rows = list(reader)
+    if not rows:
+        raise ValueError("Input CSV has no data rows.")
+    if limit is not None:
+        rows = rows[:limit]
+    return rows
 
 
 def auto_output_path(config: Config) -> Path:
