@@ -77,3 +77,35 @@ def build_tool_schema(explain: bool) -> dict:
             "required": required,
         },
     }
+
+
+def parse_response(response, latency_ms: int) -> dict:
+    """Extract answer/explanation/usage from an Anthropic Messages response."""
+    tool_block = next(
+        (b for b in response.content if getattr(b, "type", None) == "tool_use"
+         and getattr(b, "name", None) == "submit_answer"),
+        None,
+    )
+    usage = response.usage
+    base = {
+        "stop_reason": response.stop_reason or "",
+        "input_tokens": getattr(usage, "input_tokens", 0) or 0,
+        "output_tokens": getattr(usage, "output_tokens", 0) or 0,
+        "cache_read_tokens": getattr(usage, "cache_read_input_tokens", 0) or 0,
+        "cache_creation_tokens": getattr(usage, "cache_creation_input_tokens", 0) or 0,
+        "latency_ms": latency_ms,
+    }
+    if tool_block is None:
+        return {
+            **base,
+            "answer": "",
+            "explanation": "",
+            "error": "no tool_use block in response",
+        }
+    payload = tool_block.input or {}
+    return {
+        **base,
+        "answer": payload.get("answer", "") or "",
+        "explanation": payload.get("explanation", "") or "",
+        "error": "",
+    }
