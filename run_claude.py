@@ -117,7 +117,9 @@ def auto_output_path(config: Config) -> Path:
         f"{config.model}_think-{config.thinking}_n{config.n}"
         f"_explain-{explain_label}_{stamp}.csv"
     )
-    return Path("results") / name
+    # Anchor to the script's directory so output lands in the project's
+    # results/ regardless of where the user invoked python from.
+    return Path(__file__).resolve().parent / "results" / name
 
 
 def parse_args(argv: list[str] | None = None) -> Config:
@@ -224,7 +226,7 @@ def make_request_kwargs(config: Config, prompt: str, tools: list[dict]) -> dict:
     thinking_on = config.thinking == "on"
     if thinking_on:
         max_tokens = max(config.max_tokens, config.thinking_budget + 1024)
-        tool_choice = {"type": "auto"}
+        tool_choice = {"type": "auto", "disable_parallel_tool_use": True}
         user_content = prompt + THINKING_TOOL_INSTRUCTION
     else:
         max_tokens = config.max_tokens
@@ -334,10 +336,23 @@ async def run_study(config: Config) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
-    rows = load_input_rows(config.input, config.limit)
+    try:
+        rows = load_input_rows(config.input, config.limit)
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
     tools = [build_tool_schema(explain=config.explain)]
     output_path = Path(config.output) if config.output else auto_output_path(config)
     run_id = str(uuid.uuid4())
+
+    if config.thinking == "on":
+        print(
+            "note: extended thinking forces tool_choice=auto (API constraint); "
+            "rare rows may return text instead of a tool call. Check the 'error' "
+            "and 'answer' columns after the run.",
+            file=sys.stderr,
+        )
 
     n_calls = len(rows) * config.n
     print(

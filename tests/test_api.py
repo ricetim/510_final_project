@@ -41,7 +41,7 @@ def test_make_request_kwargs_with_thinking():
     assert kw["thinking"] == {"type": "enabled", "budget_tokens": 4096}
     # Anthropic API rejects forced tool_choice (type "tool" or "any") when
     # thinking is enabled. Must use "auto" and rely on prompt instruction.
-    assert kw["tool_choice"] == {"type": "auto"}
+    assert kw["tool_choice"] == {"type": "auto", "disable_parallel_tool_use": True}
     # max_tokens must exceed thinking_budget; auto-bump applies
     assert kw["max_tokens"] >= 4096 + 1024
 
