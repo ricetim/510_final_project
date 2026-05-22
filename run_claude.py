@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
 
 
 @dataclass(frozen=True)
@@ -18,6 +20,47 @@ class Config:
     limit: int | None
     output: str | None
     max_tokens: int
+
+
+RESULT_INPUT_COLUMNS: list[str] = [
+    "base_id",
+    "original_scenario_a",
+    "variant_description",
+    "full_binary_prompt",
+    "virtue",
+]
+
+
+OUTPUT_COLUMNS: list[str] = [
+    *RESULT_INPUT_COLUMNS,
+    "replicate_idx",
+    "model",
+    "thinking",
+    "thinking_budget",
+    "temperature",
+    "explain_requested",
+    "answer",
+    "explanation",
+    "stop_reason",
+    "input_tokens",
+    "output_tokens",
+    "cache_read_tokens",
+    "cache_creation_tokens",
+    "latency_ms",
+    "timestamp_utc",
+    "error",
+    "run_id",
+]
+
+
+def auto_output_path(config: Config) -> Path:
+    explain_label = "yes" if config.explain else "no"
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    name = (
+        f"{config.model}_think-{config.thinking}_n{config.n}"
+        f"_explain-{explain_label}_{stamp}.csv"
+    )
+    return Path("results") / name
 
 
 def parse_args(argv: list[str] | None = None) -> Config:

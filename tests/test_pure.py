@@ -125,3 +125,44 @@ def test_parse_response_missing_explanation(tool_use_response):
     parsed = parse_response(r, latency_ms=10)
     assert parsed["answer"] == "No"
     assert parsed["explanation"] == ""
+
+
+import re
+
+from run_claude import (
+    Config, auto_output_path, OUTPUT_COLUMNS, RESULT_INPUT_COLUMNS,
+)
+
+
+def _cfg(**overrides) -> Config:
+    base = dict(
+        input="in.csv", model="claude-opus-4-7", thinking="off",
+        thinking_budget=4096, explain=False, n=10, temperature=1.0,
+        concurrency=5, limit=None, output=None, max_tokens=1024,
+    )
+    base.update(overrides)
+    return Config(**base)
+
+
+def test_auto_output_path_pattern():
+    cfg = _cfg(model="claude-opus-4-7", thinking="off", n=10, explain=False)
+    p = auto_output_path(cfg)
+    assert p.parent.name == "results"
+    assert re.match(
+        r"claude-opus-4-7_think-off_n10_explain-no_\d{8}-\d{6}\.csv",
+        p.name,
+    )
+
+
+def test_auto_output_path_explain_yes():
+    cfg = _cfg(explain=True)
+    assert "explain-yes" in auto_output_path(cfg).name
+
+
+def test_output_columns_include_input_columns():
+    for col in RESULT_INPUT_COLUMNS:
+        assert col in OUTPUT_COLUMNS
+
+
+def test_output_columns_are_unique():
+    assert len(OUTPUT_COLUMNS) == len(set(OUTPUT_COLUMNS))
