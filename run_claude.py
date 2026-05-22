@@ -173,6 +173,35 @@ def parse_response(response, latency_ms: int) -> dict:
     }
 
 
+def make_request_kwargs(config: Config, prompt: str, tools: list[dict]) -> dict:
+    """Build kwargs for client.messages.create()."""
+    thinking_on = config.thinking == "on"
+    if thinking_on:
+        max_tokens = max(config.max_tokens, config.thinking_budget + 1024)
+        tool_choice = {"type": "any", "disable_parallel_tool_use": True}
+    else:
+        max_tokens = config.max_tokens
+        tool_choice = {
+            "type": "tool",
+            "name": "submit_answer",
+            "disable_parallel_tool_use": True,
+        }
+    kw: dict = {
+        "model": config.model,
+        "max_tokens": max_tokens,
+        "temperature": config.temperature,
+        "messages": [{"role": "user", "content": prompt}],
+        "tools": tools,
+        "tool_choice": tool_choice,
+    }
+    if thinking_on:
+        kw["thinking"] = {
+            "type": "enabled",
+            "budget_tokens": config.thinking_budget,
+        }
+    return kw
+
+
 class ResultWriter:
     """Writes the header on construction; one row per call to write()."""
 
