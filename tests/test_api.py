@@ -1,9 +1,12 @@
 """Tests for API call construction and execution (mocked)."""
 from __future__ import annotations
 
+import asyncio
+from unittest.mock import AsyncMock
+
 import pytest
 
-from run_claude import Config, build_tool_schema, make_request_kwargs
+from run_claude import Config, build_tool_schema, make_request_kwargs, run_single
 
 
 def _cfg(**overrides) -> Config:
@@ -46,3 +49,77 @@ def test_make_request_kwargs_auto_bumps_max_tokens():
     tools = [build_tool_schema(explain=False)]
     kw = make_request_kwargs(cfg, prompt="x", tools=tools)
     assert kw["max_tokens"] >= 8000 + 1024
+
+
+@pytest.fixture
+def input_row() -> dict:
+    return {
+        "base_id": "PRU-001",
+        "original_scenario_a": "orig",
+        "variant_description": "variant 1",
+        "full_binary_prompt": "Would you do X? Answer only with Yes or No.",
+        "virtue": "Prudence",
+    }
+
+
+def _fake_client(response):
+    client = AsyncMock()
+    client.messages.create = AsyncMock(return_value=response)
+    return client
+
+
+async def test_run_single_success(input_row, tool_use_response):
+    client = _fake_client(tool_use_response(answer="Yes", explanation="ok"))
+    cfg = _cfg()
+    sem = asyncio.Semaphore(1)
+    tools = [build_tool_schema(explain=False)]
+    row = await run_single(client, sem, cfg, tools, input_row, replicate_idx=3,
+                            run_id="abc-123")
+    assert row["answer"] == "Yes"
+    assert row["explanation"] == "ok"
+    assert row["base_id"] == "PRU-001"
+    assert row["replicate_idx"] == 3
+    assert row["model"] == cfg.model
+    assert row["thinking"] == "off"
+    assert row["thinking_budget"] == ""           # blanked when thinking=off
+    assert row["temperature"] == cfg.temperature
+    assert row["explain_requested"] is False
+    assert row["run_id"] == "abc-123"
+    assert row["error"] == ""
+    assert row["timestamp_utc"]                    # non-empty
+
+
+async def test_run_single_with_thinking_records_budget(input_row, tool_use_response):
+    client = _fake_client(tool_use_response())
+    cfg = _cfg(thinking="on", thinking_budget=2048)
+    sem = asyncio.Semaphore(1)
+    tools = [build_tool_schema(explain=False)]
+    row = await run_single(client, sem, cfg, tools, input_row, 0, "rid")
+    assert row["thinking"] == "on"
+    assert row["thinking_budget"] == 2048
+
+
+async def test_run_single_api_failure_captured(input_row):
+    client = AsyncMock()
+    client.messages.create = AsyncMock(side_effect=RuntimeError("boom"))
+    cfg = _cfg()
+    sem = asyncio.Semaphore(1)
+    tools = [build_tool_schema(explain=False)]
+    row = await run_single(client, sem, cfg, tools, input_row, 0, "rid")
+    assert row["answer"] == ""
+    assert "boom" in row["error"]
+    assert row["stop_reason"] == ""
+    # Row still has all metadata columns:
+    assert row["base_id"] == "PRU-001"
+    assert row["replicate_idx"] == 0
+
+
+async def test_run_single_no_tool_use_block(input_row, text_only_response):
+    client = _fake_client(text_only_response())
+    cfg = _cfg()
+    sem = asyncio.Semaphore(1)
+    tools = [build_tool_schema(explain=False)]
+    row = await run_single(client, sem, cfg, tools, input_row, 0, "rid")
+    assert row["answer"] == ""
+    assert "no tool_use block" in row["error"].lower()
+    assert row["stop_reason"] == "end_turn"

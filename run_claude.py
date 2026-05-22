@@ -2,7 +2,10 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import csv
+import time
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -229,3 +232,48 @@ class ResultWriter:
 
     def __exit__(self, exc_type, exc, tb) -> None:
         self.close()
+
+
+async def run_single(
+    client,
+    semaphore: asyncio.Semaphore,
+    config: Config,
+    tools: list[dict],
+    row: dict,
+    replicate_idx: int,
+    run_id: str,
+) -> dict:
+    """Issue one API call for one (row, replicate). Always returns a result row."""
+    kwargs = make_request_kwargs(config, row["full_binary_prompt"], tools)
+    metadata = {
+        **{c: row.get(c, "") for c in RESULT_INPUT_COLUMNS},
+        "replicate_idx": replicate_idx,
+        "model": config.model,
+        "thinking": config.thinking,
+        "thinking_budget": config.thinking_budget if config.thinking == "on" else "",
+        "temperature": config.temperature,
+        "explain_requested": config.explain,
+        "timestamp_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "run_id": run_id,
+    }
+    async with semaphore:
+        t0 = time.monotonic()
+        try:
+            response = await client.messages.create(**kwargs)
+            latency_ms = int((time.monotonic() - t0) * 1000)
+        except Exception as exc:  # noqa: BLE001 — we want to capture all SDK errors
+            latency_ms = int((time.monotonic() - t0) * 1000)
+            return {
+                **metadata,
+                "answer": "",
+                "explanation": "",
+                "stop_reason": "",
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "cache_read_tokens": 0,
+                "cache_creation_tokens": 0,
+                "latency_ms": latency_ms,
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+    parsed = parse_response(response, latency_ms)
+    return {**metadata, **parsed}
