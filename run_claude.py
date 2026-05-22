@@ -309,3 +309,61 @@ async def run_single(
             }
     parsed = parse_response(response, latency_ms)
     return {**metadata, **parsed}
+
+
+from dotenv import load_dotenv
+from tqdm.asyncio import tqdm_asyncio
+
+
+async def run_study(config: Config) -> int:
+    """Top-level orchestrator. Returns process exit code."""
+    load_dotenv()  # populate ANTHROPIC_API_KEY from .env if present
+    try:
+        config = preflight(config)
+    except ConfigError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+    rows = load_input_rows(config.input, config.limit)
+    tools = [build_tool_schema(explain=config.explain)]
+    output_path = Path(config.output) if config.output else auto_output_path(config)
+    run_id = str(uuid.uuid4())
+
+    n_calls = len(rows) * config.n
+    print(
+        f"run_id={run_id}  output={output_path}  "
+        f"calls={n_calls} ({len(rows)} rows x {config.n} replicates)",
+        file=sys.stderr,
+    )
+
+    # Import the SDK lazily so unit tests don't require it to be importable.
+    from anthropic import AsyncAnthropic
+
+    client = AsyncAnthropic(max_retries=3)
+    semaphore = asyncio.Semaphore(config.concurrency)
+
+    tasks = [
+        asyncio.create_task(
+            run_single(client, semaphore, config, tools, row, replicate_idx, run_id)
+        )
+        for row in rows
+        for replicate_idx in range(config.n)
+    ]
+
+    with ResultWriter(output_path) as writer:
+        for coro in tqdm_asyncio.as_completed(tasks, total=len(tasks)):
+            result = await coro
+            writer.write(result)
+
+    print(f"done: wrote {len(tasks)} rows to {output_path}", file=sys.stderr)
+    return 0
+
+
+def main() -> None:
+    config = parse_args()
+    exit_code = asyncio.run(run_study(config))
+    sys.exit(exit_code)
+
+
+if __name__ == "__main__":
+    main()
