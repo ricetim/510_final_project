@@ -6,14 +6,21 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from run_claude import Config, build_tool_schema, make_request_kwargs, run_single
+from run_claude import (
+    Config, RateLimiter, build_tool_schema, make_request_kwargs, run_single,
+)
+
+
+def _no_pace() -> RateLimiter:
+    """RateLimiter that never sleeps — for tests that don't care about pacing."""
+    return RateLimiter(rpm=100_000)
 
 
 def _cfg(**overrides) -> Config:
     base = dict(
         input="in.csv", model="claude-opus-4-7", thinking="off",
         thinking_budget=4096, explain=False, n=10, temperature=1.0,
-        concurrency=5, limit=None, output=None, max_tokens=1024,
+        concurrency=5, limit=None, output=None, max_tokens=1024, rpm=45,
     )
     base.update(overrides)
     return Config(**base)
@@ -86,8 +93,8 @@ async def test_run_single_success(input_row, tool_use_response):
     cfg = _cfg()
     sem = asyncio.Semaphore(1)
     tools = [build_tool_schema(explain=False)]
-    row = await run_single(client, sem, cfg, tools, input_row, replicate_idx=3,
-                            run_id="abc-123")
+    row = await run_single(client, sem, _no_pace(), cfg, tools, input_row,
+                            replicate_idx=3, run_id="abc-123")
     assert row["answer"] == "Yes"
     assert row["explanation"] == "ok"
     assert row["base_id"] == "PRU-001"
@@ -107,7 +114,7 @@ async def test_run_single_with_thinking_records_budget(input_row, tool_use_respo
     cfg = _cfg(thinking="on", thinking_budget=2048)
     sem = asyncio.Semaphore(1)
     tools = [build_tool_schema(explain=False)]
-    row = await run_single(client, sem, cfg, tools, input_row, 0, "rid")
+    row = await run_single(client, sem, _no_pace(), cfg, tools, input_row, 0, "rid")
     assert row["thinking"] == "on"
     assert row["thinking_budget"] == 2048
 
@@ -118,7 +125,7 @@ async def test_run_single_api_failure_captured(input_row):
     cfg = _cfg()
     sem = asyncio.Semaphore(1)
     tools = [build_tool_schema(explain=False)]
-    row = await run_single(client, sem, cfg, tools, input_row, 0, "rid")
+    row = await run_single(client, sem, _no_pace(), cfg, tools, input_row, 0, "rid")
     assert row["answer"] == ""
     assert "boom" in row["error"]
     assert row["stop_reason"] == ""
@@ -132,7 +139,24 @@ async def test_run_single_no_tool_use_block(input_row, text_only_response):
     cfg = _cfg()
     sem = asyncio.Semaphore(1)
     tools = [build_tool_schema(explain=False)]
-    row = await run_single(client, sem, cfg, tools, input_row, 0, "rid")
+    row = await run_single(client, sem, _no_pace(), cfg, tools, input_row, 0, "rid")
     assert row["answer"] == ""
     assert "no tool_use block" in row["error"].lower()
     assert row["stop_reason"] == "end_turn"
+
+
+async def test_rate_limiter_paces_calls():
+    """5 calls at 600 rpm (100ms interval) should take at least 400ms total."""
+    limiter = RateLimiter(rpm=600)
+    t0 = asyncio.get_event_loop().time()
+    await asyncio.gather(*[limiter.acquire() for _ in range(5)])
+    elapsed = asyncio.get_event_loop().time() - t0
+    # First acquire is immediate; remaining 4 must wait one interval each.
+    assert elapsed >= 0.4, f"expected >= 0.4s, got {elapsed:.3f}s"
+    # And not absurdly slow either (loose upper bound to avoid flake):
+    assert elapsed < 1.0, f"limiter is too slow: {elapsed:.3f}s"
+
+
+def test_rate_limiter_rejects_zero_rpm():
+    with pytest.raises(ValueError):
+        RateLimiter(rpm=0)

@@ -22,6 +22,7 @@ def test_parse_args_minimum_required():
     assert cfg.limit is None
     assert cfg.output is None
     assert cfg.max_tokens == 1024
+    assert cfg.rpm == 45
 
 
 def test_parse_args_all_flags():
@@ -37,6 +38,7 @@ def test_parse_args_all_flags():
         "--limit", "5",
         "--output", "out.csv",
         "--max-tokens", "2048",
+        "--rpm", "120",
     ])
     assert cfg.model == "claude-sonnet-4-6"
     assert cfg.thinking == "on"
@@ -48,6 +50,7 @@ def test_parse_args_all_flags():
     assert cfg.limit == 5
     assert cfg.output == "out.csv"
     assert cfg.max_tokens == 2048
+    assert cfg.rpm == 120
 
 
 def test_parse_args_missing_required_input():
@@ -142,7 +145,7 @@ def _cfg(**overrides) -> Config:
     base = dict(
         input="in.csv", model="claude-opus-4-7", thinking="off",
         thinking_budget=4096, explain=False, n=10, temperature=1.0,
-        concurrency=5, limit=None, output=None, max_tokens=1024,
+        concurrency=5, limit=None, output=None, max_tokens=1024, rpm=45,
     )
     base.update(overrides)
     return Config(**base)

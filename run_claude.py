@@ -29,6 +29,33 @@ class Config:
     limit: int | None
     output: str | None
     max_tokens: int
+    rpm: int                # client-side requests-per-minute cap
+
+
+class RateLimiter:
+    """Pace request starts to at most `rpm` per 60 seconds.
+
+    Enforces a minimum interval (60/rpm seconds) between successive
+    `acquire()` returns. Multiple callers serialize through a lock but
+    each one sleeps independently, so the limiter does not become a
+    concurrency bottleneck — it just delays callers that arrive too
+    early. Pairs with `asyncio.Semaphore` (which caps in-flight calls).
+    """
+
+    def __init__(self, rpm: int):
+        if rpm <= 0:
+            raise ValueError(f"rpm must be positive, got {rpm}")
+        self._interval = 60.0 / rpm
+        self._lock = asyncio.Lock()
+        self._next_allowed = 0.0  # monotonic time when the next acquire may proceed
+
+    async def acquire(self) -> None:
+        async with self._lock:
+            now = time.monotonic()
+            wait = max(0.0, self._next_allowed - now)
+            self._next_allowed = max(now, self._next_allowed) + self._interval
+        if wait > 0:
+            await asyncio.sleep(wait)
 
 
 class ConfigError(RuntimeError):
@@ -142,6 +169,9 @@ def parse_args(argv: list[str] | None = None) -> Config:
                    help="Output CSV path. Auto-generated under results/ if omitted.")
     p.add_argument("--max-tokens", type=int, default=1024,
                    help="Messages API max_tokens. Auto-bumped above --thinking-budget when needed.")
+    p.add_argument("--rpm", type=int, default=45,
+                   help="Client-side requests-per-minute cap (defaults to 45 to stay under "
+                        "tier-1 50 RPM limits with headroom; raise if you're on a higher tier).")
     ns = p.parse_args(argv)
     return Config(
         input=ns.input,
@@ -155,6 +185,7 @@ def parse_args(argv: list[str] | None = None) -> Config:
         limit=ns.limit,
         output=ns.output,
         max_tokens=ns.max_tokens,
+        rpm=ns.rpm,
     )
 
 
@@ -284,6 +315,7 @@ class ResultWriter:
 async def run_single(
     client,
     semaphore: asyncio.Semaphore,
+    rate_limiter: RateLimiter,
     config: Config,
     tools: list[dict],
     row: dict,
@@ -304,6 +336,7 @@ async def run_single(
         "run_id": run_id,
     }
     async with semaphore:
+        await rate_limiter.acquire()
         t0 = time.monotonic()
         try:
             response = await client.messages.create(**kwargs)
@@ -355,21 +388,28 @@ async def run_study(config: Config) -> int:
         )
 
     n_calls = len(rows) * config.n
+    est_minutes = n_calls / config.rpm
     print(
         f"run_id={run_id}  output={output_path}  "
-        f"calls={n_calls} ({len(rows)} rows x {config.n} replicates)",
+        f"calls={n_calls} ({len(rows)} rows x {config.n} replicates)  "
+        f"rpm={config.rpm} (~{est_minutes:.1f} min at rate-limit floor)",
         file=sys.stderr,
     )
 
     # Import the SDK lazily so unit tests don't require it to be importable.
     from anthropic import AsyncAnthropic
 
-    client = AsyncAnthropic(max_retries=3)
+    # max_retries=10 (up from default 3) so the SDK can dig out of any 429
+    # bursts that slip through proactive pacing — it uses the Retry-After
+    # header from the API with exponential backoff.
+    client = AsyncAnthropic(max_retries=10)
     semaphore = asyncio.Semaphore(config.concurrency)
+    rate_limiter = RateLimiter(config.rpm)
 
     tasks = [
         asyncio.create_task(
-            run_single(client, semaphore, config, tools, row, replicate_idx, run_id)
+            run_single(client, semaphore, rate_limiter, config,
+                       tools, row, replicate_idx, run_id)
         )
         for row in rows
         for replicate_idx in range(config.n)
