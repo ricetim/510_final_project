@@ -157,23 +157,25 @@ def parse_args(argv: list[str] | None = None) -> Config:
 
 
 def build_tool_schema(explain: bool) -> dict:
+    properties: dict = {
+        "answer": {
+            "type": "string",
+            "enum": ["Yes", "No"],
+            "description": "Your answer to the question.",
+        },
+    }
+    if explain:
+        properties["explanation"] = {
+            "type": "string",
+            "description": "Brief explanation of your reasoning.",
+        }
     required = ["answer", "explanation"] if explain else ["answer"]
     return {
         "name": "submit_answer",
         "description": "Submit your answer to the moral scenario.",
         "input_schema": {
             "type": "object",
-            "properties": {
-                "answer": {
-                    "type": "string",
-                    "enum": ["Yes", "No"],
-                    "description": "Your answer to the question.",
-                },
-                "explanation": {
-                    "type": "string",
-                    "description": "Brief explanation of your reasoning.",
-                },
-            },
+            "properties": properties,
             "required": required,
         },
     }

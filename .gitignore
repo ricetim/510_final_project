@@ -17,5 +17,5 @@ venv/
 .vscode/
 *.swp
 
-# Result CSVs — uncomment if outputs get large and you don't want them versioned
-# results/*.csv
+# Result CSVs — runs accumulate fast; commit summary tables separately if needed
+results/*.csv

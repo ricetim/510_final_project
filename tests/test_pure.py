@@ -73,12 +73,16 @@ def test_tool_schema_explain_off():
     assert schema["name"] == "submit_answer"
     props = schema["input_schema"]["properties"]
     assert props["answer"]["enum"] == ["Yes", "No"]
-    assert "explanation" in props
+    # explanation is omitted entirely so the model cannot volunteer one,
+    # which would contaminate runs intended to capture answers only.
+    assert "explanation" not in props
     assert schema["input_schema"]["required"] == ["answer"]
 
 
 def test_tool_schema_explain_on():
     schema = build_tool_schema(explain=True)
+    props = schema["input_schema"]["properties"]
+    assert "explanation" in props
     assert set(schema["input_schema"]["required"]) == {"answer", "explanation"}
 
 
