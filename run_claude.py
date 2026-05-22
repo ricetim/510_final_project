@@ -12,6 +12,9 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 
+from dotenv import load_dotenv
+from tqdm.asyncio import tqdm_asyncio
+
 
 @dataclass(frozen=True)
 class Config:
@@ -310,9 +313,6 @@ async def run_single(
     parsed = parse_response(response, latency_ms)
     return {**metadata, **parsed}
 
-
-from dotenv import load_dotenv
-from tqdm.asyncio import tqdm_asyncio
 
 
 async def run_study(config: Config) -> int:
