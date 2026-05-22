@@ -50,12 +50,12 @@ def test_parse_args_all_flags():
     assert cfg.max_tokens == 2048
 
 
-def test_parse_args_missing_required_input(capsys):
+def test_parse_args_missing_required_input():
     with pytest.raises(SystemExit):
         parse_args(["--model", "claude-opus-4-7"])
 
 
-def test_parse_args_missing_required_model(capsys):
+def test_parse_args_missing_required_model():
     with pytest.raises(SystemExit):
         parse_args(["--input", "in.csv"])
 
