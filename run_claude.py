@@ -211,12 +211,19 @@ def parse_response(response, latency_ms: int) -> dict:
     }
 
 
+THINKING_TOOL_INSTRUCTION = (
+    "\n\nReturn your answer by calling the submit_answer tool. "
+    "Do not respond with plain text."
+)
+
+
 def make_request_kwargs(config: Config, prompt: str, tools: list[dict]) -> dict:
     """Build kwargs for client.messages.create()."""
     thinking_on = config.thinking == "on"
     if thinking_on:
         max_tokens = max(config.max_tokens, config.thinking_budget + 1024)
-        tool_choice = {"type": "any", "disable_parallel_tool_use": True}
+        tool_choice = {"type": "auto"}
+        user_content = prompt + THINKING_TOOL_INSTRUCTION
     else:
         max_tokens = config.max_tokens
         tool_choice = {
@@ -224,11 +231,12 @@ def make_request_kwargs(config: Config, prompt: str, tools: list[dict]) -> dict:
             "name": "submit_answer",
             "disable_parallel_tool_use": True,
         }
+        user_content = prompt
     kw: dict = {
         "model": config.model,
         "max_tokens": max_tokens,
         "temperature": config.temperature,
-        "messages": [{"role": "user", "content": prompt}],
+        "messages": [{"role": "user", "content": user_content}],
         "tools": tools,
         "tool_choice": tool_choice,
     }

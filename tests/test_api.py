@@ -39,9 +39,22 @@ def test_make_request_kwargs_with_thinking():
     tools = [build_tool_schema(explain=False)]
     kw = make_request_kwargs(cfg, prompt="Hello?", tools=tools)
     assert kw["thinking"] == {"type": "enabled", "budget_tokens": 4096}
-    assert kw["tool_choice"] == {"type": "any", "disable_parallel_tool_use": True}
+    # Anthropic API rejects forced tool_choice (type "tool" or "any") when
+    # thinking is enabled. Must use "auto" and rely on prompt instruction.
+    assert kw["tool_choice"] == {"type": "auto"}
     # max_tokens must exceed thinking_budget; auto-bump applies
     assert kw["max_tokens"] >= 4096 + 1024
+
+
+def test_make_request_kwargs_with_thinking_appends_tool_instruction():
+    """When thinking is on, the prompt must include an explicit instruction
+    to call the submit_answer tool — otherwise the model may return plain text."""
+    cfg = _cfg(thinking="on")
+    tools = [build_tool_schema(explain=False)]
+    kw = make_request_kwargs(cfg, prompt="Original prompt.", tools=tools)
+    content = kw["messages"][0]["content"]
+    assert content.startswith("Original prompt.")
+    assert "submit_answer" in content
 
 
 def test_make_request_kwargs_auto_bumps_max_tokens():
