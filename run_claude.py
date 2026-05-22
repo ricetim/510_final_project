@@ -171,3 +171,32 @@ def parse_response(response, latency_ms: int) -> dict:
         "explanation": payload.get("explanation", "") or "",
         "error": "",
     }
+
+
+class ResultWriter:
+    """Writes the header on construction; one row per call to write()."""
+
+    def __init__(self, path: Path):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self._f = path.open("w", newline="", encoding="utf-8")
+        self._writer = csv.DictWriter(
+            self._f,
+            fieldnames=OUTPUT_COLUMNS,
+            quoting=csv.QUOTE_ALL,
+            extrasaction="ignore",
+        )
+        self._writer.writeheader()
+        self._f.flush()
+
+    def write(self, row: dict) -> None:
+        self._writer.writerow(row)
+        self._f.flush()
+
+    def close(self) -> None:
+        self._f.close()
+
+    def __enter__(self) -> "ResultWriter":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.close()
