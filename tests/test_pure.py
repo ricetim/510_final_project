@@ -63,3 +63,28 @@ def test_parse_args_missing_required_model():
 def test_parse_args_thinking_choices():
     with pytest.raises(SystemExit):
         parse_args(["--input", "in.csv", "--model", "x", "--thinking", "maybe"])
+
+
+from run_claude import build_tool_schema
+
+
+def test_tool_schema_explain_off():
+    schema = build_tool_schema(explain=False)
+    assert schema["name"] == "submit_answer"
+    props = schema["input_schema"]["properties"]
+    assert props["answer"]["enum"] == ["Yes", "No"]
+    assert "explanation" in props
+    assert schema["input_schema"]["required"] == ["answer"]
+
+
+def test_tool_schema_explain_on():
+    schema = build_tool_schema(explain=True)
+    assert set(schema["input_schema"]["required"]) == {"answer", "explanation"}
+
+
+def test_tool_schema_is_independent_per_call():
+    """Mutating one returned schema must not affect a later call."""
+    a = build_tool_schema(explain=False)
+    a["input_schema"]["required"].append("explanation")
+    b = build_tool_schema(explain=False)
+    assert b["input_schema"]["required"] == ["answer"]

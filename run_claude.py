@@ -54,3 +54,26 @@ def parse_args(argv: list[str] | None = None) -> Config:
         output=ns.output,
         max_tokens=ns.max_tokens,
     )
+
+
+def build_tool_schema(explain: bool) -> dict:
+    required = ["answer", "explanation"] if explain else ["answer"]
+    return {
+        "name": "submit_answer",
+        "description": "Submit your answer to the moral scenario.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "answer": {
+                    "type": "string",
+                    "enum": ["Yes", "No"],
+                    "description": "Your answer to the question.",
+                },
+                "explanation": {
+                    "type": "string",
+                    "description": "Brief explanation of your reasoning.",
+                },
+            },
+            "required": required,
+        },
+    }
