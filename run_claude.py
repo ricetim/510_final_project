@@ -4,9 +4,11 @@ from __future__ import annotations
 import argparse
 import asyncio
 import csv
+import os
+import sys
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -24,6 +26,36 @@ class Config:
     limit: int | None
     output: str | None
     max_tokens: int
+
+
+class ConfigError(RuntimeError):
+    pass
+
+
+def preflight(config: Config) -> Config:
+    """Validate env + flag combinations. Returns a possibly-corrected Config."""
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        raise ConfigError(
+            "ANTHROPIC_API_KEY is not set. Add it to .env or export it."
+        )
+    if not Path(config.input).exists():
+        raise ConfigError(f"input CSV not found: {config.input}")
+
+    # Flag combo corrections + warnings.
+    corrected = config
+    if config.thinking == "on" and config.temperature != 1.0:
+        print(
+            f"warning: extended thinking requires temperature=1.0; "
+            f"overriding --temperature {config.temperature} -> 1.0",
+            file=sys.stderr,
+        )
+        corrected = replace(corrected, temperature=1.0)
+    if config.thinking == "off" and config.thinking_budget != 4096:
+        print(
+            "warning: --thinking-budget is ignored when --thinking off",
+            file=sys.stderr,
+        )
+    return corrected
 
 
 RESULT_INPUT_COLUMNS: list[str] = [

@@ -166,3 +166,43 @@ def test_output_columns_include_input_columns():
 
 def test_output_columns_are_unique():
     assert len(OUTPUT_COLUMNS) == len(set(OUTPUT_COLUMNS))
+
+
+from run_claude import ConfigError, preflight
+
+
+def test_preflight_missing_api_key_raises(monkeypatch, tmp_input_csv):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    cfg = _cfg(input=str(tmp_input_csv))
+    with pytest.raises(ConfigError, match="ANTHROPIC_API_KEY"):
+        preflight(cfg)
+
+
+def test_preflight_missing_input_file_raises(monkeypatch, tmp_path):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
+    cfg = _cfg(input=str(tmp_path / "missing.csv"))
+    with pytest.raises(ConfigError, match="input"):
+        preflight(cfg)
+
+
+def test_preflight_temperature_forced_when_thinking_on(monkeypatch, tmp_input_csv, capsys):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
+    cfg = _cfg(input=str(tmp_input_csv), thinking="on", temperature=0.5)
+    out = preflight(cfg)
+    assert out.temperature == 1.0
+    captured = capsys.readouterr()
+    assert "temperature" in captured.err.lower() or "temperature" in captured.out.lower()
+
+
+def test_preflight_warns_unused_budget(monkeypatch, tmp_input_csv, capsys):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
+    cfg = _cfg(input=str(tmp_input_csv), thinking="off", thinking_budget=9000)
+    preflight(cfg)
+    captured = capsys.readouterr()
+    assert "ignored" in (captured.err + captured.out).lower()
+
+
+def test_preflight_returns_config_unchanged_when_ok(monkeypatch, tmp_input_csv):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
+    cfg = _cfg(input=str(tmp_input_csv), thinking="off")
+    assert preflight(cfg) == cfg
