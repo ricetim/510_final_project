@@ -4,21 +4,21 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this project is
 
-A single-script Python research tool that runs the prompts in `moral_variant_binary_data.csv` through the Anthropic Claude API and records structured Yes/No answers (optionally with explanations) into a long-format CSV. The dataset has 50 prompts spanning five demographic variants × ten base scenarios across four virtues; the analysis goal is to detect demographic bias in moral judgments by comparing answer distributions across variants.
+A single-script Python research tool that runs moral-scenario prompts through the Anthropic Claude API and records structured Yes/No answers (optionally with explanations) into a long-format CSV. The current dataset is a crossed design of moral scenarios × 5 race variants (white, black, latino, east asian, indigenous) × 3 income variants (low, middle, high) = 15 demographic variants per scenario. The analysis goal is to detect demographic bias in moral judgments by comparing answer distributions across variants.
 
-The full design is in `docs/superpowers/specs/2026-05-21-claude-moral-variant-runner-design.md`. The implementation plan is in `docs/superpowers/plans/2026-05-21-claude-moral-variant-runner-plan.md`. Both are the source of truth — read them before making non-trivial changes.
+The full design is in `docs/superpowers/specs/2026-05-21-claude-moral-variant-runner-design.md`. The implementation plan is in `docs/superpowers/plans/2026-05-21-claude-moral-variant-runner-plan.md`. They describe the architecture accurately, but **note**: the input CSV schema in those docs (`base_id, original_scenario_a, variant_description, full_binary_prompt, virtue`) is now historical — the live schema is the one in `RESULT_INPUT_COLUMNS` at the top of `run_claude.py`. See "Input schema" below.
 
 ## Commands
 
 Always activate the venv first: `source .venv/bin/activate`.
 
-- `pytest` — run all 36 tests (no real API calls; everything is mocked via `SimpleNamespace` fixtures in `tests/conftest.py`).
+- `pytest` — run all 38 tests (no real API calls; everything is mocked via `SimpleNamespace` fixtures in `tests/conftest.py`).
 - `pytest tests/test_pure.py::test_name -v` — run a single test by name.
 - `python run_claude.py --help` — list every CLI flag and default.
 - A working invocation:
   ```
   python run_claude.py \
-      --input moral_variant_binary_data.csv \
+      --input test_variants_first200.csv \
       --model claude-haiku-4-5-20251001 \
       --thinking off \
       --n 10
@@ -26,6 +26,20 @@ Always activate the venv first: `source .venv/bin/activate`.
 - Smoke-test a config without burning credits: add `--limit 1 --n 1 --concurrency 1`.
 
 API key lives in `.env` (gitignored). Output CSVs land in `results/` and are gitignored — commit summary tables only.
+
+## Input schema
+
+The input CSV must have these columns (declared in `RESULT_INPUT_COLUMNS` in `run_claude.py`):
+
+| Column | What it holds |
+|---|---|
+| `scenario_id` | Stable identifier for the underlying moral scenario (multiple rows share an ID, one per variant). |
+| `original_scenario` | The base scenario text, demographic-stripped. |
+| `race_variant` | One of: `white`, `black`, `latino`, `east asian`, `indigenous`. |
+| `income_variant` | One of: `low`, `middle`, `high`. |
+| `variant_scenario` | The full prompt sent to the model — `original_scenario` rewritten with a demographic frame, ending in "Answer only with Yes or No." |
+
+`run_single` reads the prompt from `row["variant_scenario"]`. All five columns get copied verbatim onto every output row so the result CSV is self-describing for downstream analysis.
 
 ## Architecture
 
@@ -49,7 +63,7 @@ Functions in `run_claude.py`, by responsibility:
 - **Extended thinking + forced tool use is rejected by the API.** With `--thinking on`, `tool_choice` must be `{"type": "auto"}` (not `"tool"` or `"any"`), so the model *may* return plain text. We compensate by appending `THINKING_TOOL_INSTRUCTION` to the prompt. In practice the model always calls the tool, but `parse_response` records `error: "no tool_use block in response"` on the rare miss. After any thinking-on run, sanity-check `pd.read_csv(out).query('error != ""')` — if non-empty, you have a methodology issue to address before analysis.
 - **Output path is anchored to the script's directory, not CWD.** `auto_output_path` uses `Path(__file__).resolve().parent / "results"` so invocations from `~/` still land in the project's `results/`.
 - **One config per invocation, by design.** No sweeps; the auto-generated filename `{model}_think-{on|off}_n{N}_explain-{yes|no}_{YYYYMMDD-HHMMSS}.csv` is meant to make shell-loop sweeps identifiable. If you find yourself reaching for sweep support, push back — the spec deliberately deferred it.
-- **No resumability.** A full run is ~500 calls / ~1–2 minutes at default concurrency; cheaper to re-run than to maintain a `--resume` path. Don't add one without a real need.
+- **No resumability.** This was the call when the dataset was 50 prompts (~500 calls at `--n 10`, minutes long — cheaper to re-run than to maintain `--resume`). With the current crossed dataset (~3000 rows × `--n 10` = ~30,000 calls, capped at ~45 rpm = ~11 hours), that calculus is weaker. Before adding resumability, prefer (a) `--limit` to chunk runs into hours-scale slices, or (b) negotiating higher rate limits. If you genuinely need resumability, talk to the user first — it's a real design decision now, not just over-engineering.
 - **`pyproject.toml` is for `pip install -e ".[dev]"`, not Poetry.** System Python is 3.10; `requires-python = ">=3.10"`. Don't bump to 3.11 without a real reason — nothing in the script uses 3.11+ features.
 
 ## When changing the schema
@@ -59,5 +73,5 @@ If you touch `RESULT_INPUT_COLUMNS` or `OUTPUT_COLUMNS`, the analysis side (down
 ## What this project is not
 
 - It is not a generic LLM eval framework. Don't add abstractions for "different datasets" or "different providers" until a second one actually exists.
-- It is not a production service. No retry queues, no observability stack, no auth layer. The SDK's built-in `max_retries=3` is the entire reliability story.
+- It is not a production service. No retry queues, no observability stack, no auth layer. The SDK's built-in retries (configured to `max_retries=10` in `run_study`) are the entire reliability story — they lean on the `Retry-After` header for 429 backoff.
 - It does not yet have a `run_openai.py` sibling — the user intends to add one, at which point any genuinely shared code can be extracted into a small `study_io.py`. Until then, premature deduplication is the larger risk.

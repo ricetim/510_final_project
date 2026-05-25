@@ -89,11 +89,11 @@ def preflight(config: Config) -> Config:
 
 
 RESULT_INPUT_COLUMNS: list[str] = [
-    "base_id",
-    "original_scenario_a",
-    "variant_description",
-    "full_binary_prompt",
-    "virtue",
+    "scenario_id",
+    "original_scenario",
+    "race_variant",
+    "income_variant",
+    "variant_scenario",
 ]
 
 
@@ -323,7 +323,7 @@ async def run_single(
     run_id: str,
 ) -> dict:
     """Issue one API call for one (row, replicate). Always returns a result row."""
-    kwargs = make_request_kwargs(config, row["full_binary_prompt"], tools)
+    kwargs = make_request_kwargs(config, row["variant_scenario"], tools)
     metadata = {
         **{c: row.get(c, "") for c in RESULT_INPUT_COLUMNS},
         "replicate_idx": replicate_idx,

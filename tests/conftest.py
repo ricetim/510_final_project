@@ -12,10 +12,10 @@ def tmp_input_csv(tmp_path: Path) -> Path:
     """Create a 3-row input CSV with the canonical schema."""
     p = tmp_path / "input.csv"
     p.write_text(
-        "base_id,original_scenario_a,variant_description,full_binary_prompt,virtue\n"
-        'PRU-001,"orig A","variant 1","prompt text 1. Answer only with Yes or No.",Prudence\n'
-        'PRU-001,"orig A","variant 2","prompt text 2. Answer only with Yes or No.",Prudence\n'
-        'JUS-001,"orig B","variant 3","prompt text 3. Answer only with Yes or No.",Justice\n'
+        "scenario_id,original_scenario,race_variant,income_variant,variant_scenario\n"
+        '00001,"orig A",white,low,"prompt text 1. Answer only with Yes or No."\n'
+        '00001,"orig A",black,low,"prompt text 2. Answer only with Yes or No."\n'
+        '00002,"orig B",latino,high,"prompt text 3. Answer only with Yes or No."\n'
     )
     return p
 

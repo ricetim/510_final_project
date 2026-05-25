@@ -74,11 +74,11 @@ def test_make_request_kwargs_auto_bumps_max_tokens():
 @pytest.fixture
 def input_row() -> dict:
     return {
-        "base_id": "PRU-001",
-        "original_scenario_a": "orig",
-        "variant_description": "variant 1",
-        "full_binary_prompt": "Would you do X? Answer only with Yes or No.",
-        "virtue": "Prudence",
+        "scenario_id": "00001",
+        "original_scenario": "orig",
+        "race_variant": "white",
+        "income_variant": "low",
+        "variant_scenario": "Would you do X? Answer only with Yes or No.",
     }
 
 
@@ -97,7 +97,7 @@ async def test_run_single_success(input_row, tool_use_response):
                             replicate_idx=3, run_id="abc-123")
     assert row["answer"] == "Yes"
     assert row["explanation"] == "ok"
-    assert row["base_id"] == "PRU-001"
+    assert row["scenario_id"] == "00001"
     assert row["replicate_idx"] == 3
     assert row["model"] == cfg.model
     assert row["thinking"] == "off"
@@ -130,7 +130,7 @@ async def test_run_single_api_failure_captured(input_row):
     assert "boom" in row["error"]
     assert row["stop_reason"] == ""
     # Row still has all metadata columns:
-    assert row["base_id"] == "PRU-001"
+    assert row["scenario_id"] == "00001"
     assert row["replicate_idx"] == 0
 
 
