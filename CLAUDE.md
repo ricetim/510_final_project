@@ -12,7 +12,7 @@ The full design is in `docs/superpowers/specs/2026-05-21-claude-moral-variant-ru
 
 Always activate the venv first: `source .venv/bin/activate`.
 
-- `pytest` — run all 40 tests (no real API calls; everything is mocked via `SimpleNamespace` fixtures in `tests/conftest.py`).
+- `pytest` — run all 43 tests (no real API calls; everything is mocked via `SimpleNamespace` fixtures in `tests/conftest.py`).
 - `pytest tests/test_pure.py::test_name -v` — run a single test by name.
 - `python run_claude.py --help` — list every CLI flag and default.
 - A working invocation:
@@ -61,7 +61,7 @@ Functions in `run_claude.py`, by responsibility:
 - `parse_response(response, latency_ms)` → extracts `answer` / `explanation` / token counts / `stop_reason`. Records `error: "no tool_use block in response"` if the model returned text instead of calling the tool.
 - `ResultWriter(path)` — streaming `csv.DictWriter` with `QUOTE_ALL` and `flush()` after every row for crash safety.
 - `run_study(config)` (async) — the orchestrator. Loads dotenv, runs preflight, lazy-imports `AsyncAnthropic`, creates tasks for `len(rows) × config.n`, bounds concurrency with `asyncio.Semaphore`, streams rows via `tqdm_asyncio.as_completed` so a mid-run crash leaves prior rows on disk.
-- `OUTPUT_COLUMNS` (constant, 23 entries) — the result-CSV schema. Config metadata is duplicated on every row so each file is self-describing for `pd.concat` across runs.
+- `OUTPUT_COLUMNS` (constant, 25 entries) — the result-CSV schema. Config metadata is duplicated on every row so each file is self-describing for `pd.concat` across runs. The `provider` column ("anthropic" | "openai") and `reasoning_effort` column (blank for Claude, populated for OpenAI runs) let cross-provider CSVs from `run_claude.py` and the forthcoming `run_openai.py` be `pd.concat`-ed without a remapping pass.
 
 ## Gotchas worth remembering
 

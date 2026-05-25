@@ -179,6 +179,18 @@ def test_output_columns_are_unique():
     assert len(OUTPUT_COLUMNS) == len(set(OUTPUT_COLUMNS))
 
 
+def test_output_columns_includes_provider():
+    assert "provider" in OUTPUT_COLUMNS
+
+
+def test_output_columns_includes_reasoning_effort():
+    assert "reasoning_effort" in OUTPUT_COLUMNS
+
+
+def test_output_columns_count_is_25():
+    assert len(OUTPUT_COLUMNS) == 25
+
+
 from run_claude import ConfigError, preflight
 
 

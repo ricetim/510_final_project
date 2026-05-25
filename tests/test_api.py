@@ -108,6 +108,8 @@ async def test_run_single_success(input_row, tool_use_response):
     assert row["run_id"] == "abc-123"
     assert row["error"] == ""
     assert row["timestamp_utc"]                    # non-empty
+    assert row["provider"] == "anthropic"
+    assert row["reasoning_effort"] == ""
 
 
 async def test_run_single_with_thinking_records_budget(input_row, tool_use_response):
@@ -160,6 +162,7 @@ async def test_run_single_api_failure_captured(input_row):
     # Row still has all metadata columns:
     assert row["scenario_id"] == "00001"
     assert row["replicate_idx"] == 0
+    assert row["provider"] == "anthropic"
 
 
 async def test_run_single_no_tool_use_block(input_row, text_only_response):

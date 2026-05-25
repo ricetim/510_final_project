@@ -15,6 +15,8 @@ from pathlib import Path
 from dotenv import load_dotenv
 from tqdm.asyncio import tqdm_asyncio
 
+PROVIDER = "anthropic"
+
 
 @dataclass(frozen=True)
 class Config:
@@ -101,9 +103,11 @@ RESULT_INPUT_COLUMNS: list[str] = [
 OUTPUT_COLUMNS: list[str] = [
     *RESULT_INPUT_COLUMNS,
     "replicate_idx",
+    "provider",
     "model",
     "thinking",
     "thinking_budget",
+    "reasoning_effort",
     "temperature",
     "explain_requested",
     "question",
@@ -335,9 +339,11 @@ async def run_single(
     metadata = {
         **{c: row.get(c, "") for c in RESULT_INPUT_COLUMNS},
         "replicate_idx": replicate_idx,
+        "provider": PROVIDER,
         "model": config.model,
         "thinking": config.thinking,
         "thinking_budget": config.thinking_budget if config.thinking == "on" else "",
+        "reasoning_effort": "",
         "temperature": config.temperature,
         "explain_requested": config.explain,
         "question": config.question,
