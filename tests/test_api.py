@@ -21,6 +21,7 @@ def _cfg(**overrides) -> Config:
         input="in.csv", model="claude-opus-4-7", thinking="off",
         thinking_budget=4096, explain=False, n=10, temperature=1.0,
         concurrency=5, limit=None, output=None, max_tokens=1024, rpm=45,
+        question="",
     )
     base.update(overrides)
     return Config(**base)
@@ -117,6 +118,33 @@ async def test_run_single_with_thinking_records_budget(input_row, tool_use_respo
     row = await run_single(client, sem, _no_pace(), cfg, tools, input_row, 0, "rid")
     assert row["thinking"] == "on"
     assert row["thinking_budget"] == 2048
+
+
+async def test_run_single_appends_question_to_prompt(input_row, tool_use_response):
+    """--question text must be concatenated onto variant_scenario before sending."""
+    client = _fake_client(tool_use_response())
+    question = " Was this acceptable behavior? Answer only with Yes or No."
+    cfg = _cfg(question=question)
+    sem = asyncio.Semaphore(1)
+    tools = [build_tool_schema(explain=False)]
+    row = await run_single(client, sem, _no_pace(), cfg, tools, input_row, 0, "rid")
+    # Captured the suffix on the row for downstream analysis
+    assert row["question"] == question
+    # Sent the concatenated prompt to the API
+    sent_kwargs = client.messages.create.await_args.kwargs
+    sent_content = sent_kwargs["messages"][0]["content"]
+    assert sent_content == input_row["variant_scenario"] + question
+
+
+async def test_run_single_empty_question_is_passthrough(input_row, tool_use_response):
+    """Default empty --question must not alter the prompt."""
+    client = _fake_client(tool_use_response())
+    cfg = _cfg(question="")
+    sem = asyncio.Semaphore(1)
+    tools = [build_tool_schema(explain=False)]
+    await run_single(client, sem, _no_pace(), cfg, tools, input_row, 0, "rid")
+    sent_kwargs = client.messages.create.await_args.kwargs
+    assert sent_kwargs["messages"][0]["content"] == input_row["variant_scenario"]
 
 
 async def test_run_single_api_failure_captured(input_row):

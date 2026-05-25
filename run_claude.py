@@ -30,6 +30,7 @@ class Config:
     output: str | None
     max_tokens: int
     rpm: int                # client-side requests-per-minute cap
+    question: str           # appended to each variant_scenario before sending
 
 
 class RateLimiter:
@@ -105,6 +106,7 @@ OUTPUT_COLUMNS: list[str] = [
     "thinking_budget",
     "temperature",
     "explain_requested",
+    "question",
     "answer",
     "explanation",
     "stop_reason",
@@ -172,6 +174,10 @@ def parse_args(argv: list[str] | None = None) -> Config:
     p.add_argument("--rpm", type=int, default=45,
                    help="Client-side requests-per-minute cap (defaults to 45 to stay under "
                         "tier-1 50 RPM limits with headroom; raise if you're on a higher tier).")
+    p.add_argument("--question", default="",
+                   help="Text appended to each variant_scenario before sending to the model. "
+                        "Use to test different framings without modifying the input CSV, e.g. "
+                        '\' Was this acceptable behavior? Answer only with Yes or No.\'')
     ns = p.parse_args(argv)
     return Config(
         input=ns.input,
@@ -186,6 +192,7 @@ def parse_args(argv: list[str] | None = None) -> Config:
         output=ns.output,
         max_tokens=ns.max_tokens,
         rpm=ns.rpm,
+        question=ns.question,
     )
 
 
@@ -323,7 +330,8 @@ async def run_single(
     run_id: str,
 ) -> dict:
     """Issue one API call for one (row, replicate). Always returns a result row."""
-    kwargs = make_request_kwargs(config, row["variant_scenario"], tools)
+    prompt = row["variant_scenario"] + config.question
+    kwargs = make_request_kwargs(config, prompt, tools)
     metadata = {
         **{c: row.get(c, "") for c in RESULT_INPUT_COLUMNS},
         "replicate_idx": replicate_idx,
@@ -332,6 +340,7 @@ async def run_single(
         "thinking_budget": config.thinking_budget if config.thinking == "on" else "",
         "temperature": config.temperature,
         "explain_requested": config.explain,
+        "question": config.question,
         "timestamp_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "run_id": run_id,
     }

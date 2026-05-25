@@ -12,7 +12,7 @@ The full design is in `docs/superpowers/specs/2026-05-21-claude-moral-variant-ru
 
 Always activate the venv first: `source .venv/bin/activate`.
 
-- `pytest` — run all 38 tests (no real API calls; everything is mocked via `SimpleNamespace` fixtures in `tests/conftest.py`).
+- `pytest` — run all 40 tests (no real API calls; everything is mocked via `SimpleNamespace` fixtures in `tests/conftest.py`).
 - `pytest tests/test_pure.py::test_name -v` — run a single test by name.
 - `python run_claude.py --help` — list every CLI flag and default.
 - A working invocation:
@@ -21,7 +21,8 @@ Always activate the venv first: `source .venv/bin/activate`.
       --input test_variants_first200.csv \
       --model claude-haiku-4-5-20251001 \
       --thinking off \
-      --n 10
+      --n 10 \
+      --question ' Was this acceptable behavior? Answer only with Yes or No.'
   ```
 - Smoke-test a config without burning credits: add `--limit 1 --n 1 --concurrency 1`.
 
@@ -37,9 +38,13 @@ The input CSV must have these columns (declared in `RESULT_INPUT_COLUMNS` in `ru
 | `original_scenario` | The base scenario text, demographic-stripped. |
 | `race_variant` | One of: `white`, `black`, `latino`, `east asian`, `indigenous`. |
 | `income_variant` | One of: `low`, `middle`, `high`. |
-| `variant_scenario` | The full prompt sent to the model — `original_scenario` rewritten with a demographic frame, ending in "Answer only with Yes or No." |
+| `variant_scenario` | The scenario as a statement with a demographic frame. **Does not contain a yes/no question on its own** — pass one via `--question` at run time (see below). |
 
-`run_single` reads the prompt from `row["variant_scenario"]`. All five columns get copied verbatim onto every output row so the result CSV is self-describing for downstream analysis.
+`run_single` reads the scenario from `row["variant_scenario"]`, concatenates `config.question` onto the end, and sends the result. All five input columns get copied verbatim onto every output row so the result CSV is self-describing for downstream analysis.
+
+### Why `--question` is a runner flag, not a CSV column
+
+The variants in `variant_scenario` are statements (e.g., "I am a low income white person. I usually... but I didn't... because..."). They aren't yes/no questions on their own — without a trailing question + answer instruction, the model has to invent what it's being asked, which produces unreliable defaults (saw 373/375 "No" answers in early testing). The `--question` flag exists so you can A/B different framings ("Was this acceptable behavior?" vs "Was this a valid reason?" vs ...) against the same canonical dataset without regenerating it. The chosen question is recorded in the `question` column of every output row so downstream `pd.concat` across runs stays unambiguous.
 
 ## Architecture
 
@@ -56,7 +61,7 @@ Functions in `run_claude.py`, by responsibility:
 - `parse_response(response, latency_ms)` → extracts `answer` / `explanation` / token counts / `stop_reason`. Records `error: "no tool_use block in response"` if the model returned text instead of calling the tool.
 - `ResultWriter(path)` — streaming `csv.DictWriter` with `QUOTE_ALL` and `flush()` after every row for crash safety.
 - `run_study(config)` (async) — the orchestrator. Loads dotenv, runs preflight, lazy-imports `AsyncAnthropic`, creates tasks for `len(rows) × config.n`, bounds concurrency with `asyncio.Semaphore`, streams rows via `tqdm_asyncio.as_completed` so a mid-run crash leaves prior rows on disk.
-- `OUTPUT_COLUMNS` (constant, 22 entries) — the result-CSV schema. Config metadata is duplicated on every row so each file is self-describing for `pd.concat` across runs.
+- `OUTPUT_COLUMNS` (constant, 23 entries) — the result-CSV schema. Config metadata is duplicated on every row so each file is self-describing for `pd.concat` across runs.
 
 ## Gotchas worth remembering
 
