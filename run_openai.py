@@ -4,9 +4,11 @@ from __future__ import annotations
 import argparse
 import asyncio
 import csv
+import json
 import os
 import sys
 import time
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -224,10 +226,6 @@ class ResultWriter:
         self.close()
 
 
-import json
-import uuid
-
-
 def build_output_schema(explain: bool) -> dict:
     """JSON Schema for forced structured output via Responses API.
 
@@ -262,7 +260,7 @@ def make_request_kwargs(config: Config, prompt: str, output_schema: dict) -> dic
     # Reasoning runs need headroom for reasoning tokens above the user-requested
     # output budget. 1024 is a conservative floor; the user can raise --max-tokens.
     if thinking_on:
-        max_output_tokens = max(config.max_tokens, config.max_tokens + 1024)
+        max_output_tokens = config.max_tokens + 1024
     else:
         max_output_tokens = config.max_tokens
     kw: dict = {
