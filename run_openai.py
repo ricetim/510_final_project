@@ -7,7 +7,7 @@ import csv
 import os
 import sys
 import time
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -224,6 +224,232 @@ class ResultWriter:
         self.close()
 
 
-# Placeholder for the API call functions — added in Chunk 5.
-# Placeholder for run_single and run_study — added in Chunk 5.
-# Placeholder for main — added in Chunk 5.
+import json
+import uuid
+
+
+def build_output_schema(explain: bool) -> dict:
+    """JSON Schema for forced structured output via Responses API.
+
+    Mirrors the spirit of build_tool_schema in run_claude.py: the
+    explanation key is omitted from properties entirely when explain=False
+    so the model cannot volunteer one and contaminate answer-only runs.
+    """
+    properties: dict = {
+        "answer": {
+            "type": "string",
+            "enum": ["Yes", "No"],
+            "description": "Your answer to the question.",
+        },
+    }
+    if explain:
+        properties["explanation"] = {
+            "type": "string",
+            "description": "Brief explanation of your reasoning.",
+        }
+    required = ["answer", "explanation"] if explain else ["answer"]
+    return {
+        "type": "object",
+        "properties": properties,
+        "required": required,
+        "additionalProperties": False,
+    }
+
+
+def make_request_kwargs(config: Config, prompt: str, output_schema: dict) -> dict:
+    """Build kwargs for client.responses.create()."""
+    thinking_on = config.thinking == "on"
+    # Reasoning runs need headroom for reasoning tokens above the user-requested
+    # output budget. 1024 is a conservative floor; the user can raise --max-tokens.
+    if thinking_on:
+        max_output_tokens = max(config.max_tokens, config.max_tokens + 1024)
+    else:
+        max_output_tokens = config.max_tokens
+    kw: dict = {
+        "model": config.model,
+        "input": prompt,
+        "text": {
+            "format": {
+                "type": "json_schema",
+                "name": "moral_answer",
+                "schema": output_schema,
+                "strict": True,
+            },
+        },
+        "max_output_tokens": max_output_tokens,
+    }
+    if thinking_on:
+        # Reasoning models reject `temperature`; omit it entirely.
+        kw["reasoning"] = {"effort": config.reasoning_effort}
+    else:
+        kw["temperature"] = config.temperature
+    return kw
+
+
+def parse_response(response, latency_ms: int) -> dict:
+    """Extract answer/explanation/usage from an OpenAI Responses API response."""
+    usage = response.usage
+    base = {
+        "stop_reason": getattr(response, "status", "") or "",
+        "input_tokens": getattr(usage, "input_tokens", 0) or 0,
+        "output_tokens": getattr(usage, "output_tokens", 0) or 0,
+        "cache_read_tokens": getattr(
+            getattr(usage, "input_tokens_details", None), "cached_tokens", 0
+        ) or 0,
+        "cache_creation_tokens": 0,  # OpenAI cache is automatic; no creation cost
+        "latency_ms": latency_ms,
+    }
+
+    # Check for incomplete response (e.g., max_output_tokens hit)
+    if getattr(response, "status", "") == "incomplete":
+        reason = getattr(
+            getattr(response, "incomplete_details", None), "reason", "unknown"
+        )
+        return {
+            **base,
+            "answer": "",
+            "explanation": "",
+            "error": f"incomplete: {reason}",
+        }
+
+    # Check for refusal items in output
+    for item in getattr(response, "output", []) or []:
+        if getattr(item, "type", None) == "refusal":
+            return {
+                **base,
+                "answer": "",
+                "explanation": "",
+                "error": f"model refusal: {getattr(item, 'refusal', '')}",
+            }
+
+    # Parse the structured JSON output
+    output_text = getattr(response, "output_text", "") or ""
+    try:
+        payload = json.loads(output_text)
+    except (json.JSONDecodeError, ValueError) as exc:
+        return {
+            **base,
+            "answer": "",
+            "explanation": "",
+            "error": f"json parse error: {exc}",
+        }
+    return {
+        **base,
+        "answer": payload.get("answer", "") or "",
+        "explanation": payload.get("explanation", "") or "",
+        "error": "",
+    }
+
+
+async def run_single(
+    client,
+    semaphore: asyncio.Semaphore,
+    rate_limiter: RateLimiter,
+    config: Config,
+    output_schema: dict,
+    row: dict,
+    replicate_idx: int,
+    run_id: str,
+) -> dict:
+    """Issue one API call for one (row, replicate). Always returns a result row."""
+    prompt = row["variant_scenario"] + config.question
+    kwargs = make_request_kwargs(config, prompt, output_schema)
+    metadata = {
+        **{c: row.get(c, "") for c in RESULT_INPUT_COLUMNS},
+        "replicate_idx": replicate_idx,
+        "provider": PROVIDER,
+        "model": config.model,
+        "thinking": config.thinking,
+        "thinking_budget": "",  # n/a for OpenAI
+        "reasoning_effort": config.reasoning_effort if config.thinking == "on" else "",
+        "temperature": config.temperature if config.thinking == "off" else "",
+        "explain_requested": config.explain,
+        "question": config.question,
+        "timestamp_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "run_id": run_id,
+    }
+    async with semaphore:
+        await rate_limiter.acquire()
+        t0 = time.monotonic()
+        try:
+            response = await client.responses.create(**kwargs)
+            latency_ms = int((time.monotonic() - t0) * 1000)
+        except Exception as exc:  # noqa: BLE001 — capture all SDK errors
+            latency_ms = int((time.monotonic() - t0) * 1000)
+            return {
+                **metadata,
+                "answer": "",
+                "explanation": "",
+                "stop_reason": "",
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "cache_read_tokens": 0,
+                "cache_creation_tokens": 0,
+                "latency_ms": latency_ms,
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+    parsed = parse_response(response, latency_ms)
+    return {**metadata, **parsed}
+
+
+async def run_study(config: Config) -> int:
+    """Top-level orchestrator. Returns process exit code."""
+    load_dotenv()
+    try:
+        config = preflight(config)
+    except ConfigError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+    try:
+        rows = load_input_rows(config.input, config.limit)
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+    output_schema = build_output_schema(explain=config.explain)
+    output_path = Path(config.output) if config.output else auto_output_path(config)
+    run_id = str(uuid.uuid4())
+
+    n_calls = len(rows) * config.n
+    est_minutes = n_calls / config.rpm
+    print(
+        f"run_id={run_id}  output={output_path}  "
+        f"calls={n_calls} ({len(rows)} rows x {config.n} replicates)  "
+        f"rpm={config.rpm} (~{est_minutes:.1f} min at rate-limit floor)",
+        file=sys.stderr,
+    )
+
+    from openai import AsyncOpenAI
+    from tqdm.asyncio import tqdm_asyncio
+
+    client = AsyncOpenAI(max_retries=10)
+    semaphore = asyncio.Semaphore(config.concurrency)
+    rate_limiter = RateLimiter(config.rpm)
+
+    tasks = [
+        asyncio.create_task(
+            run_single(client, semaphore, rate_limiter, config,
+                       output_schema, row, replicate_idx, run_id)
+        )
+        for row in rows
+        for replicate_idx in range(config.n)
+    ]
+
+    with ResultWriter(output_path) as writer:
+        for coro in tqdm_asyncio.as_completed(tasks, total=len(tasks)):
+            result = await coro
+            writer.write(result)
+
+    print(f"done: wrote {len(tasks)} rows to {output_path}", file=sys.stderr)
+    return 0
+
+
+def main() -> None:
+    config = parse_args()
+    exit_code = asyncio.run(run_study(config))
+    sys.exit(exit_code)
+
+
+if __name__ == "__main__":
+    main()
