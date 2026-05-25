@@ -12,7 +12,7 @@ The full design is in `docs/superpowers/specs/2026-05-21-claude-moral-variant-ru
 
 Always activate the venv first: `source .venv/bin/activate`.
 
-- `pytest` — run all 43 tests (no real API calls; everything is mocked via `SimpleNamespace` fixtures in `tests/conftest.py`).
+- `pytest` — run all 79 tests (no real API calls; everything is mocked via `SimpleNamespace` fixtures in `tests/conftest.py`).
 - `pytest tests/test_pure.py::test_name -v` — run a single test by name.
 - `python run_claude.py --help` — list every CLI flag and default.
 - A working invocation:
@@ -45,6 +45,42 @@ The input CSV must have these columns (declared in `RESULT_INPUT_COLUMNS` in `ru
 ### Why `--question` is a runner flag, not a CSV column
 
 The variants in `variant_scenario` are statements (e.g., "I am a low income white person. I usually... but I didn't... because..."). They aren't yes/no questions on their own — without a trailing question + answer instruction, the model has to invent what it's being asked, which produces unreliable defaults (saw 373/375 "No" answers in early testing). The `--question` flag exists so you can A/B different framings ("Was this acceptable behavior?" vs "Was this a valid reason?" vs ...) against the same canonical dataset without regenerating it. The chosen question is recorded in the `question` column of every output row so downstream `pd.concat` across runs stays unambiguous.
+
+## OpenAI sibling runner
+
+`run_openai.py` is a parallel sibling to `run_claude.py` for running the same dataset through OpenAI's Responses API. The two runners produce CSVs with **the same 25-column schema** so cross-provider analysis is just `pd.concat([claude_csv, openai_csv])`.
+
+Working invocation:
+
+```
+python run_openai.py \
+    --input test_variants_first200.csv \
+    --model gpt-4o-mini \
+    --thinking off \
+    --n 10 \
+    --question ' Was this acceptable behavior? Answer only with Yes or No.'
+```
+
+For reasoning models (o-series, GPT-5):
+
+```
+python run_openai.py \
+    --input test_variants_first200.csv \
+    --model o4-mini \
+    --thinking on \
+    --reasoning-effort medium \
+    --n 5 \
+    --question ' Was this acceptable behavior? Answer only with Yes or No.'
+```
+
+Differences from `run_claude.py` worth knowing:
+- Env var: `OPENAI_API_KEY` (not `ANTHROPIC_API_KEY`).
+- Default `--rpm` is **400** (vs Claude's 45) — OpenAI tier-1 allows more.
+- Reasoning knob is `--reasoning-effort low|medium|high` (not `--thinking-budget N`). Only meaningful with `--thinking on`; warned-and-ignored otherwise.
+- Reasoning models **reject `temperature`** — we drop it from the request when `--thinking on`. The temperature column is recorded as `""` for those rows.
+- Auto-output filename uses `reasoning-{off|low|med|high}` instead of `think-{on|off}`.
+
+**Code overlap with `run_claude.py` is intentional duplication** (RateLimiter, ResultWriter, load_input_rows, OUTPUT_COLUMNS, RESULT_INPUT_COLUMNS, auto_output_path are all duplicated verbatim). The spec defers `study_io.py` extraction to a follow-up commit, once the actual divergence (or lack thereof) is empirically visible. Don't extract without an explicit decision — premature deduplication is the larger risk per this repo's stance.
 
 ## Architecture
 
@@ -79,4 +115,4 @@ If you touch `RESULT_INPUT_COLUMNS` or `OUTPUT_COLUMNS`, the analysis side (down
 
 - It is not a generic LLM eval framework. Don't add abstractions for "different datasets" or "different providers" until a second one actually exists.
 - It is not a production service. No retry queues, no observability stack, no auth layer. The SDK's built-in retries (configured to `max_retries=10` in `run_study`) are the entire reliability story — they lean on the `Retry-After` header for 429 backoff.
-- It does not yet have a `run_openai.py` sibling — the user intends to add one, at which point any genuinely shared code can be extracted into a small `study_io.py`. Until then, premature deduplication is the larger risk.
+- `run_openai.py` exists as a parallel sibling using OpenAI's Responses API. Any genuinely shared code between the two has not yet been extracted into a `study_io.py` module — the spec for the OpenAI runner deferred that to a follow-up. If you find yourself touching the same helper in both files, that's the signal to consider extraction; otherwise leave them duplicated.
