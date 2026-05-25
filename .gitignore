@@ -19,3 +19,8 @@ venv/
 
 # Result CSVs — runs accumulate fast; commit summary tables separately if needed
 results/*.csv
+
+# Large input dataset CSVs — kept locally, not committed
+JUS_moral_variant_binary_data_full_crossed*.csv
+_virtuebench_*.csv
+test_variants_*.csv
