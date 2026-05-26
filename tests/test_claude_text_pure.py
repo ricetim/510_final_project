@@ -125,12 +125,19 @@ def test_preflight_missing_input_file_raises(monkeypatch, tmp_path):
         preflight(cfg)
 
 
-def test_preflight_explain_raises(monkeypatch, tmp_input_csv):
-    """text mode cannot enforce structured explanations — preflight rejects --explain."""
+def test_preflight_accepts_explain(monkeypatch, tmp_input_csv):
+    """text mode now supports --explain via prompt instruction + line-split parse."""
     monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
     cfg = _cfg(input=str(tmp_input_csv), explain=True)
-    with pytest.raises(ConfigError, match="text mode does not support --explain"):
-        preflight(cfg)
+    out = preflight(cfg)
+    assert out.explain is True
+
+
+def test_auto_output_path_explain_yes_label():
+    """When --explain on, filename should reflect it."""
+    cfg = _cfg(model="claude-haiku-4-5-20251001", thinking="off", n=10, explain=True)
+    p = auto_output_path(cfg)
+    assert "_explain-yes_" in p.name
 
 
 def test_preflight_temperature_forced_when_thinking_on(monkeypatch, tmp_input_csv, capsys):

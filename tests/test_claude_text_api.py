@@ -98,6 +98,51 @@ def test_parse_response_unexpected_output(text_only_response):
     assert "Yes, because" in parsed["error"]
 
 
+def test_parse_response_explain_two_line(text_only_response):
+    """With explain=True, line 1 is the answer, line 2+ is the explanation."""
+    r = text_only_response(text="Yes\nThe speaker had a valid reason to stop the behavior.")
+    parsed = parse_response(r, latency_ms=10, explain=True)
+    assert parsed["answer"] == "Yes"
+    assert parsed["explanation"] == "The speaker had a valid reason to stop the behavior."
+    assert parsed["error"] == ""
+
+
+def test_parse_response_explain_multiline_explanation(text_only_response):
+    """Explanation lines after line 1 are joined with whatever newlines the model used."""
+    r = text_only_response(text="No\nFirst sentence of reasoning.\nSecond sentence.")
+    parsed = parse_response(r, latency_ms=10, explain=True)
+    assert parsed["answer"] == "No"
+    assert "First sentence" in parsed["explanation"]
+    assert "Second sentence" in parsed["explanation"]
+
+
+def test_parse_response_explain_no_newline_in_response(text_only_response):
+    """If model ignores the format instruction and returns only 'Yes', explanation is empty."""
+    r = text_only_response(text="Yes")
+    parsed = parse_response(r, latency_ms=10, explain=True)
+    assert parsed["answer"] == "Yes"
+    assert parsed["explanation"] == ""
+    assert parsed["error"] == ""
+
+
+def test_parse_response_explain_unexpected_first_line(text_only_response):
+    """If line 1 isn't Yes/No, it's still an error even in explain mode."""
+    r = text_only_response(text="It depends on context.\nHere is my reasoning...")
+    parsed = parse_response(r, latency_ms=10, explain=True)
+    assert parsed["answer"] == ""
+    assert "unexpected output" in parsed["error"].lower()
+
+
+def test_parse_response_explain_off_ignores_extra_lines(text_only_response):
+    """With explain=False (default), multi-line responses fall through to the unexpected-output path."""
+    r = text_only_response(text="Yes\nThis is extra context the user didn't ask for.")
+    parsed = parse_response(r, latency_ms=10)  # explain default False
+    # Without --explain, the whole text is the "answer attempt"; with a newline it
+    # won't match the Yes/No normalizer, so it goes to error.
+    assert parsed["answer"] == ""
+    assert "unexpected output" in parsed["error"].lower()
+
+
 def test_parse_response_no_text_block(tool_use_response):
     """A response with only a tool_use block (no text) yields an error."""
     r = tool_use_response()  # has content=[tool_use_block] only
@@ -164,6 +209,23 @@ async def test_run_single_appends_question_to_prompt(input_row, text_only_respon
     assert row["question"] == question
     sent_kwargs = client.messages.create.await_args.kwargs
     assert sent_kwargs["messages"][0]["content"] == input_row["variant_scenario"] + question
+
+
+async def test_run_single_explain_appends_instruction_and_parses(
+    input_row, text_only_response,
+):
+    """With --explain on: prompt gets the EXPLAIN_INSTRUCTION suffix, and a two-line
+    response is parsed into answer + explanation columns."""
+    client = _fake_client(text_only_response(text="No\nThe reason cited was trivial."))
+    cfg = _cfg(explain=True, question=" Was this acceptable?")
+    sem = asyncio.Semaphore(1)
+    row = await run_single(client, sem, _no_pace(), cfg, input_row, 0, "rid")
+    assert row["answer"] == "No"
+    assert row["explanation"] == "The reason cited was trivial."
+    assert row["explain_requested"] is True
+    sent_content = client.messages.create.await_args.kwargs["messages"][0]["content"]
+    assert "Line 1: exactly 'Yes' or 'No'" in sent_content
+    assert sent_content.startswith(input_row["variant_scenario"])
 
 
 async def test_run_single_api_failure_captured(input_row):

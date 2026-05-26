@@ -8,6 +8,12 @@ tool-use system prompt) and ~80% lower output token cost (just the answer,
 no tool_use wrapper), at the cost of occasional model outputs that don't
 match the expected format (recorded in the error column).
 
+Supports --explain via a prompt instruction ("answer on line 1, explanation
+on subsequent lines") and a first-newline-split parser. Less reliable than
+tool-use --explain (which enforces structured output), but stays in text
+mode so the answer distribution matches text-mode runs without --explain
+(no mechanism confound).
+
 See CLAUDE.md for the cost/quality tradeoff and when to choose each.
 """
 from __future__ import annotations
@@ -82,11 +88,6 @@ def preflight(config: Config) -> Config:
         )
     if not Path(config.input).exists():
         raise ConfigError(f"input CSV not found: {config.input}")
-    if config.explain:
-        raise ConfigError(
-            "text mode does not support --explain; use run_claude.py if you "
-            "need explanations alongside answers."
-        )
 
     corrected = config
     if config.thinking == "on" and config.temperature != 1.0:
@@ -158,10 +159,10 @@ def load_input_rows(path: str, limit: int | None) -> list[dict]:
 
 def auto_output_path(config: Config) -> Path:
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-    # explain is rejected in preflight, so always "no" in the filename.
+    explain_label = "yes" if config.explain else "no"
     name = (
         f"{config.model}_text_think-{config.thinking}_n{config.n}"
-        f"_explain-no_{stamp}.csv"
+        f"_explain-{explain_label}_{stamp}.csv"
     )
     return Path(__file__).resolve().parent / "results" / name
 
@@ -176,7 +177,9 @@ def parse_args(argv: list[str] | None = None) -> Config:
     p.add_argument("--thinking-budget", type=int, default=4096,
                    help="Tokens for extended thinking. Ignored when --thinking off.")
     p.add_argument("--explain", action="store_true",
-                   help="REJECTED in text mode; use run_claude.py for explanations.")
+                   help="Ask the model to put answer on line 1 and a 1-2 sentence "
+                        "explanation on subsequent lines. Parsed via first-newline split. "
+                        "May conflict with 'Answer only' wording in --question; adjust as needed.")
     p.add_argument("--n", type=int, default=10, help="Replicates per prompt.")
     p.add_argument("--temperature", type=float, default=1.0)
     p.add_argument("--concurrency", type=int, default=5)
@@ -208,6 +211,13 @@ def parse_args(argv: list[str] | None = None) -> Config:
     )
 
 
+EXPLAIN_INSTRUCTION = (
+    "\n\nFormat your response as follows:\n"
+    "Line 1: exactly 'Yes' or 'No' (no other words on this line)\n"
+    "Line 2 onward: 1-2 sentences explaining your answer"
+)
+
+
 def make_request_kwargs(config: Config, prompt: str) -> dict:
     """Build kwargs for client.messages.create() — no tools, raw text response."""
     thinking_on = config.thinking == "on"
@@ -226,8 +236,15 @@ def make_request_kwargs(config: Config, prompt: str) -> dict:
     return kw
 
 
-def parse_response(response, latency_ms: int) -> dict:
-    """Extract Yes/No from the first text content block; record error otherwise."""
+def parse_response(response, latency_ms: int, explain: bool = False) -> dict:
+    """Extract Yes/No (and optionally explanation) from the response text block.
+
+    When `explain` is True, the model was instructed to put the answer on the
+    first line and the explanation on subsequent lines. We split on the first
+    newline: line 1 is normalized into the answer; everything after is the
+    explanation. When `explain` is False, the answer should be the whole
+    response (with optional trailing punctuation/whitespace).
+    """
     text_block = next(
         (b for b in response.content if getattr(b, "type", None) == "text"),
         None,
@@ -249,11 +266,16 @@ def parse_response(response, latency_ms: int) -> dict:
             "error": "no text block in response",
         }
     raw = (text_block.text or "").strip()
-    normalized = raw.rstrip(".!?").strip()
+    if explain and "\n" in raw:
+        first_line, rest = raw.split("\n", 1)
+        explanation = rest.strip()
+    else:
+        first_line, explanation = raw, ""
+    normalized = first_line.strip().rstrip(".!?").strip()
     if normalized.lower() == "yes":
-        return {**base, "answer": "Yes", "explanation": "", "error": ""}
+        return {**base, "answer": "Yes", "explanation": explanation, "error": ""}
     if normalized.lower() == "no":
-        return {**base, "answer": "No", "explanation": "", "error": ""}
+        return {**base, "answer": "No", "explanation": explanation, "error": ""}
     return {
         **base,
         "answer": "",
@@ -302,6 +324,8 @@ async def run_single(
 ) -> dict:
     """Issue one API call for one (row, replicate). Always returns a result row."""
     prompt = row["variant_scenario"] + config.question
+    if config.explain:
+        prompt = prompt + EXPLAIN_INSTRUCTION
     kwargs = make_request_kwargs(config, prompt)
     metadata = {
         **{c: row.get(c, "") for c in RESULT_INPUT_COLUMNS},
@@ -337,7 +361,7 @@ async def run_single(
                 "latency_ms": latency_ms,
                 "error": f"{type(exc).__name__}: {exc}",
             }
-    parsed = parse_response(response, latency_ms)
+    parsed = parse_response(response, latency_ms, explain=config.explain)
     return {**metadata, **parsed}
 
 
