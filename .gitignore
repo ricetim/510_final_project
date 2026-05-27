@@ -16,3 +16,6 @@ venv/
 .idea/
 .vscode/
 *.swp
+
+# Local-only archive of historical run CSVs (not committed)
+.old_results/
