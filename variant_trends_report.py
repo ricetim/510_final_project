@@ -16,6 +16,13 @@ Takes a results CSV and emits a single HTML report with four views:
 
 Usage:
     python variant_trends_report.py <results_csv> [--output report.html]
+                                                  [--include-unanimous]
+
+Scenarios where all 15 variants give the SAME majority answer (everyone
+Yes, or everyone No) carry no demographic signal — they pull every pair's
+agreement / correlation toward each other without telling you anything
+about bias. By default they're dropped before the matrices are built;
+pass --include-unanimous to keep them.
 
 Default output: reports/variant_trends_<model>.html, anchored to the
 script's parent dir (not CWD), no-clobber.
@@ -120,6 +127,21 @@ def majority(yes_rate: float) -> str | None:
     if yes_rate < 0.5:
         return "No"
     return None  # 0.5 = ambiguous; exclude from this method
+
+
+def is_unanimous(rates: dict[tuple[str, str], dict[str, float]], sid: str) -> bool:
+    """True if all 15 variants give the same Yes/No majority on this scenario.
+
+    A variant with an exactly-50/50 yes-rate (no majority) prevents the
+    scenario from being unanimous — we can't say it agrees with anything.
+    """
+    seen: set[str] = set()
+    for v in VARIANTS:
+        m = majority(rates[v][sid])
+        if m is None:
+            return False
+        seen.add(m)
+    return len(seen) == 1
 
 
 def agreement_matrix(scenarios: list[str],
@@ -436,17 +458,23 @@ table.matrix th.rot > div > span { padding: 2px 4px; }
 
 
 def build_html(scenarios: list[str], rates, agree, corr, linkage, deco,
-               results_path: Path, model: str) -> str:
+               results_path: Path, model: str,
+               n_complete: int, unanimous_dropped: int) -> str:
     parts: list[str] = []
     parts.append(f"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
 <title>Variant trends</title>
 <style>{CSS}</style></head><body>""")
     parts.append("<h1>Variant trend analysis</h1>")
+    filter_note = (
+        f"{unanimous_dropped} unanimous-consensus scenarios dropped"
+        if unanimous_dropped else "unanimous-consensus scenarios included"
+    )
     parts.append(
         f'<div class="meta">Source: <code>{esc(results_path)}</code> · '
         f'Model: <code>{esc(model)}</code> · '
-        f'{len(scenarios)} scenarios with full 15-variant coverage</div>'
+        f'{len(scenarios)} of {n_complete} full-coverage scenarios used '
+        f'({esc(filter_note)})</div>'
     )
 
     # Method 1
@@ -545,6 +573,11 @@ def main() -> None:
     p.add_argument("results_csv", help="Path to results CSV.")
     p.add_argument("--output", default=None,
                    help="Output HTML path. Default: reports/variant_trends_<model>.html.")
+    p.add_argument("--include-unanimous", action="store_true",
+                   help="Keep scenarios where all 15 variants give the same "
+                        "majority answer (dropped by default — no demographic "
+                        "signal but they pull every pairwise correlation toward "
+                        "each other).")
     args = p.parse_args()
 
     results_path = Path(args.results_csv)
@@ -553,10 +586,27 @@ def main() -> None:
         sys.exit(2)
 
     scenarios, rates = load_yes_rate_matrix(results_path)
+    n_complete = len(scenarios)
+
+    unanimous_count = 0
+    if not args.include_unanimous:
+        unanimous_set = {sid for sid in scenarios if is_unanimous(rates, sid)}
+        unanimous_count = len(unanimous_set)
+        scenarios = [sid for sid in scenarios if sid not in unanimous_set]
+        rates = {v: {sid: rates[v][sid] for sid in scenarios} for v in VARIANTS}
+        if unanimous_count:
+            print(
+                f"dropped {unanimous_count} unanimous-consensus scenarios "
+                f"({unanimous_count / n_complete:.0%} of {n_complete}); "
+                f"{len(scenarios)} remain. Use --include-unanimous to keep them.",
+                file=sys.stderr,
+            )
+
     if len(scenarios) < 5:
         print(
-            f"error: only {len(scenarios)} scenarios have all 15 variants — "
-            "not enough signal for trend analysis. Need at least 5.",
+            f"error: only {len(scenarios)} scenarios remain after filtering — "
+            "not enough signal for trend analysis. Need at least 5. "
+            "Try --include-unanimous if most scenarios were dropped.",
             file=sys.stderr,
         )
         sys.exit(2)
@@ -581,7 +631,7 @@ def main() -> None:
               file=sys.stderr)
 
     html = build_html(scenarios, rates, agree, corr, linkage, deco,
-                      results_path, model)
+                      results_path, model, n_complete, unanimous_count)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(html, encoding="utf-8")
     print(f"wrote 4-method trend report ({len(scenarios)} scenarios) to {output_path}",
