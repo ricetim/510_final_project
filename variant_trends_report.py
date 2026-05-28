@@ -450,7 +450,11 @@ h1 { font-size: 1.6em; margin-bottom: 0.2em; }
 h2 { font-size: 1.25em; margin-top: 2.5em; border-bottom: 2px solid #333;
      padding-bottom: 0.3em; }
 .meta { color: #666; font-size: 0.9em; margin-bottom: 1.5em; }
-.note { color: #555; font-size: 0.9em; max-width: 78ch; margin: 0.5em 0 1em 0; }
+.note { color: #555; font-size: 0.9em; max-width: 80ch; margin: 0.5em 0 1em 0; }
+.note p { margin: 0.5em 0; }
+.note ul { margin: 0.3em 0 0.6em 0; padding-left: 1.5em; }
+.note li { margin: 0.15em 0; }
+.note em { color: #333; font-style: normal; font-weight: 500; }
 table.matrix { border-collapse: collapse; margin: 0.5em 0; font-size: 0.78em; }
 table.matrix th, table.matrix td { border: 1px solid #ccc; padding: 4px 6px;
                                    text-align: center; font-variant-numeric: tabular-nums; }
@@ -500,10 +504,35 @@ def build_html(scenarios: list[str], rates, agree, corr, linkage, deco,
     # Method 1
     parts.append("<h2>1. Pairwise agreement matrix</h2>")
     parts.append(
-        '<div class="note">Each cell: fraction of scenarios on which these two '
-        "variants gave the same majority answer (Yes-rate &gt; 0.5 vs &lt; 0.5). "
-        "Diagonal is trivially 1.00. Read hot cells as &quot;answer together,&quot; "
-        "cold cells as &quot;answer opposite.&quot;</div>"
+        '<div class="note">'
+        "<p><strong>What this shows:</strong> For every pair of demographic "
+        "variants, the fraction of scenarios on which both gave the same "
+        "Yes/No verdict.</p>"
+        "<p><strong>How it&rsquo;s computed:</strong></p>"
+        "<ul>"
+        "<li>For each variant <em>v</em> on each scenario <em>s</em>, "
+        "yes-rate(<em>v</em>, <em>s</em>) = #Yes / (#Yes + #No) across the "
+        "n = 5 replicates.</li>"
+        "<li>majority(<em>v</em>, <em>s</em>) = Yes if yes-rate &gt; 0.5, "
+        "No if &lt; 0.5, undefined if exactly 0.5 "
+        "(exactly-tied variants are excluded from that pair&rsquo;s count).</li>"
+        "<li>Cell (<em>v<sub>i</sub></em>, <em>v<sub>j</sub></em>) = "
+        "#scenarios where both majorities are defined and equal &divide; "
+        "#scenarios where both are defined.</li>"
+        "<li>Diagonal is trivially 1.00 &mdash; a variant always agrees with "
+        "itself.</li>"
+        "</ul>"
+        "<p><strong>Row mean (excl. self):</strong> Average of the 14 "
+        "off-diagonal cells in each row. Quantifies how aligned this variant "
+        "is with the others on average. A <em>low</em> row mean flags an "
+        "outlier variant whose majorities frequently disagree with the rest; "
+        "a <em>high</em> row mean indicates a variant that sits in the "
+        "consensus.</p>"
+        "<p><strong>How to read it:</strong> Hot cells = answer together, "
+        "cold cells = answer opposite. The row-mean column condenses each "
+        "variant into a single &ldquo;how central is this variant&rdquo; "
+        "score on the same color scale as the matrix.</p>"
+        "</div>"
     )
     parts.append(
         '<div class="legend">'
@@ -517,11 +546,42 @@ def build_html(scenarios: list[str], rates, agree, corr, linkage, deco,
     # Method 2
     parts.append("<h2>2. Spearman rank correlation</h2>")
     parts.append(
-        '<div class="note">Each cell: Spearman &rho; on per-scenario yes-rates. '
-        "Captures partial agreement that the majority-vote matrix above misses "
-        "(e.g. variant A at 0.8/0.6/0.2 vs B at 0.7/0.5/0.1 → high &rho; even "
-        "though all majorities are tied). Range &minus;1 (perfectly opposite) "
-        "to +1 (perfectly aligned).</div>"
+        '<div class="note">'
+        "<p><strong>What this shows:</strong> For every pair of variants, "
+        "the rank correlation between their per-scenario yes-rates. Captures "
+        "<em>partial</em> agreement that method 1&rsquo;s majority-only view "
+        "discards.</p>"
+        "<p><strong>How it&rsquo;s computed:</strong></p>"
+        "<ul>"
+        "<li>Treat each variant as a length-<em>N</em> vector of yes-rates "
+        "(one value per scenario).</li>"
+        "<li>Replace each value with its rank (1 = lowest yes-rate, "
+        "<em>N</em> = highest). Ties receive mid-ranks &mdash; e.g. three "
+        "tied values share rank 5 each, not 4/5/6.</li>"
+        "<li>Cell (<em>v<sub>i</sub></em>, <em>v<sub>j</sub></em>) = Pearson "
+        "correlation between <em>v<sub>i</sub></em>&rsquo;s rank vector and "
+        "<em>v<sub>j</sub></em>&rsquo;s rank vector.</li>"
+        "<li>Range: &minus;1 (perfectly opposite movement) through 0 "
+        "(no monotonic relationship) to +1 (perfectly aligned movement). "
+        "Diagonal is 1.00.</li>"
+        "</ul>"
+        "<p><strong>Why both this <em>and</em> method 1:</strong> Variant A "
+        "with yes-rates (0.8, 0.6, 0.2) and variant B with (0.7, 0.5, 0.1) "
+        "have identical Yes/Yes/No majorities, so method 1 scores them "
+        "100%. Spearman additionally detects that their yes-rates move in "
+        "lockstep across scenarios &mdash; a stronger statement than "
+        "&ldquo;they happened to land on the same side of 0.5 three "
+        "times.&rdquo;</p>"
+        "<p><strong>Row mean (excl. self):</strong> Average of the 14 "
+        "off-diagonal Spearman values in each row. Quantifies how strongly "
+        "this variant&rsquo;s yes-rate co-varies with the others on average. "
+        "A low row mean flags a variant that marches to its own beat; a "
+        "high one indicates a variant whose answer pattern broadly tracks "
+        "the rest.</p>"
+        "<p><strong>How to read it:</strong> Blue cells = answer together "
+        "(positive &rho;); red cells = answer opposite (negative &rho;); "
+        "pale cells = independent.</p>"
+        "</div>"
     )
     parts.append(
         '<div class="legend">'
@@ -535,10 +595,45 @@ def build_html(scenarios: list[str], rates, agree, corr, linkage, deco,
     # Method 3
     parts.append("<h2>3. Hierarchical clustering dendrogram</h2>")
     parts.append(
-        '<div class="note">Average linkage on (1 &minus; Spearman &rho;) distances. '
-        "Variants that merge low on the y-axis are most similar in answer pattern. "
-        "Cut the tree at any height to read off &quot;at this similarity threshold, "
-        "the model treats these variants as one bloc.&quot;</div>"
+        '<div class="note">'
+        "<p><strong>What this shows:</strong> A tree built by repeatedly "
+        "merging the closest pair of variants. The tree&rsquo;s structure "
+        "reveals natural demographic blocs at any chosen similarity "
+        "threshold.</p>"
+        "<p><strong>How it&rsquo;s computed:</strong></p>"
+        "<ul>"
+        "<li>Define distance(<em>v<sub>i</sub></em>, <em>v<sub>j</sub></em>) "
+        "= 1 &minus; Spearman &rho;(<em>v<sub>i</sub></em>, "
+        "<em>v<sub>j</sub></em>). Variants with &rho; = +1 are at distance "
+        "0; with &rho; = 0, distance 1; with &rho; = &minus;1, distance 2.</li>"
+        "<li>Start with 15 singleton clusters (one per variant).</li>"
+        "<li>Find the two closest clusters and merge them; record the "
+        "merge height (the distance at which they joined).</li>"
+        "<li>Repeat until one cluster remains.</li>"
+        "<li>Distance between two clusters uses <em>average linkage</em>: "
+        "<em>d</em>(A, B) is the mean of all leaf-to-leaf distances "
+        "<em>d</em>(a, b) where a &isin; A and b &isin; B.</li>"
+        "<li>After merging A and B into C, update <em>d</em>(C, X) for "
+        "every other cluster X via the Lance&ndash;Williams update: "
+        "<em>d</em>(C, X) = (|A|&middot;<em>d</em>(A, X) + |B|&middot;"
+        "<em>d</em>(B, X)) &divide; (|A| + |B|).</li>"
+        "</ul>"
+        "<p><strong>How to read it:</strong></p>"
+        "<ul>"
+        "<li><em>X-axis</em>: leaves in the order produced by a depth-first "
+        "traversal of the tree, so related variants end up adjacent.</li>"
+        "<li><em>Y-axis</em>: merge distance. A horizontal bar at height "
+        "<em>h</em> means &ldquo;at distance threshold <em>h</em>, the "
+        "subtrees below merge into one cluster.&rdquo;</li>"
+        "<li>Cut the tree at any horizontal height to read off a flat "
+        "partition. Lower cuts &rarr; more, tighter clusters; higher cuts "
+        "&rarr; fewer, looser ones.</li>"
+        "<li>The first few merges (low on the y-axis) identify the "
+        "model&rsquo;s tightest demographic groupings; the last few merges "
+        "(high up) tell you which variants resist clustering with the "
+        "others.</li>"
+        "</ul>"
+        "</div>"
     )
     # Build distance matrix (1 - corr).
     distance = [[1 - corr[i][j] for j in range(len(VARIANTS))]
@@ -548,13 +643,35 @@ def build_html(scenarios: list[str], rates, agree, corr, linkage, deco,
     # Method 4
     parts.append("<h2>4. Race-vs-income decomposition</h2>")
     parts.append(
-        '<div class="note">Mean (1 &minus; Spearman &rho;) distance for pairs of '
-        "variants that share <strong>race</strong> (n = "
-        f'{deco["n_same_race"]}), share <strong>income</strong> '
-        f'(n = {deco["n_same_income"]}), or share <strong>neither</strong> '
-        f'(n = {deco["n_different"]}). The lower number is the tighter cluster. '
-        "If same-race pairs are tighter than same-income pairs, race is the "
-        "dominant grouping axis (and vice versa).</div>"
+        '<div class="note">'
+        "<p><strong>What this shows:</strong> A single-axis summary "
+        "answering &ldquo;is the model&rsquo;s variation primarily "
+        "race-shaped or income-shaped?&rdquo;</p>"
+        "<p><strong>How it&rsquo;s computed:</strong></p>"
+        "<ul>"
+        "<li>Enumerate all 15 &middot; 14 / 2 = 105 unordered pairs of "
+        "variants.</li>"
+        "<li>Classify each pair by what its two members share:"
+        "<ul>"
+        f"<li><em>Same race, different income</em>: 5 races &times; "
+        f"C(3, 2) = <strong>{deco['n_same_race']}</strong> pairs.</li>"
+        f"<li><em>Same income, different race</em>: 3 incomes &times; "
+        f"C(5, 2) = <strong>{deco['n_same_income']}</strong> pairs.</li>"
+        f"<li><em>Different race AND different income</em>: "
+        f"<strong>{deco['n_different']}</strong> pairs (the remainder).</li>"
+        "</ul></li>"
+        "<li>For each group, compute the mean of "
+        "distance(<em>v<sub>i</sub></em>, <em>v<sub>j</sub></em>) = "
+        "1 &minus; Spearman &rho;.</li>"
+        "</ul>"
+        "<p><strong>How to read it:</strong> The group with the smallest "
+        "mean distance is the tightest cluster. If same-race pairs are "
+        "tighter than same-income pairs, the model&rsquo;s variation lives "
+        "mostly along the race axis &mdash; variants sharing a race answer "
+        "more similarly than variants sharing an income. The ratio in the "
+        "verdict line below the three cells tells you whether the dominance "
+        "is strong (ratio &raquo; 1) or marginal (ratio near 1).</p>"
+        "</div>"
     )
     parts.append('<div class="deco">')
     for key, label in (
