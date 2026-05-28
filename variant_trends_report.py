@@ -405,13 +405,25 @@ def hsl_for_corr(v: float) -> str:
     return f"hsl(0, 60%, {100 - 55 * abs(v):.0f}%)"
 
 
+def row_means_excluding_self(matrix: list[list[float]]) -> list[float]:
+    """Mean of each row excluding the diagonal cell (self-similarity)."""
+    n = len(matrix)
+    out: list[float] = []
+    for i in range(n):
+        vals = [matrix[i][j] for j in range(n) if j != i and not math.isnan(matrix[i][j])]
+        out.append(sum(vals) / len(vals) if vals else float("nan"))
+    return out
+
+
 def render_matrix(matrix: list[list[float]],
                   labels: list[str],
                   color_fn,
                   fmt: str = "{:.2f}") -> str:
+    means = row_means_excluding_self(matrix)
     parts: list[str] = ['<table class="matrix"><thead><tr><th></th>']
     for lbl in labels:
         parts.append(f'<th class="rot"><div><span>{esc(lbl)}</span></div></th>')
+    parts.append('<th class="rot rowmean-head"><div><span>row mean (excl. self)</span></div></th>')
     parts.append("</tr></thead><tbody>")
     for i, lbl in enumerate(labels):
         parts.append(f'<tr><th class="row">{esc(lbl)}</th>')
@@ -421,6 +433,11 @@ def render_matrix(matrix: list[list[float]],
             parts.append(
                 f'<td style="background:{color_fn(v)};">{esc(cell)}</td>'
             )
+        m = means[i]
+        m_cell = "—" if math.isnan(m) else fmt.format(m)
+        parts.append(
+            f'<td class="rowmean" style="background:{color_fn(m)};">{esc(m_cell)}</td>'
+        )
         parts.append("</tr>")
     parts.append("</tbody></table>")
     return "".join(parts)
@@ -442,6 +459,9 @@ table.matrix th.rot { vertical-align: bottom; height: 110px; padding: 0; }
 table.matrix th.rot > div { transform: rotate(-55deg); transform-origin: bottom left;
                             width: 20px; margin-left: 6px; white-space: nowrap; }
 table.matrix th.rot > div > span { padding: 2px 4px; }
+table.matrix th.rowmean-head, table.matrix td.rowmean {
+    border-left: 2px solid #444; font-weight: 600;
+}
 .dendrogram { background: #fafafa; border: 1px solid #ddd; max-width: 100%; }
 .deco { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1em;
         margin: 1em 0 0.5em 0; }
