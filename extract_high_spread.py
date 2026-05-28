@@ -8,12 +8,13 @@ re-running with --explain to understand the model's reasoning.
 
 Usage:
     python extract_high_spread.py results/<file>.csv [--threshold 0.8] \
-        [--input test_variants_first200.csv] [--output filtered_<n>.csv]
+        [--input scenarios/test_variants_first200.csv] [--output filtered_<n>.csv]
 
 Output:
     A filtered input CSV (same schema as the source) containing only rows
     whose scenario_id has spread > threshold in the results file.
-    Default output filename: filtered_high_spread_<N>.csv where N = scenarios kept.
+    Default output path: scenarios/filtered_high_spread_<N>.csv (the file IS
+    a scenario CSV, just one derived from another via spread filtering).
 
 Then re-run those scenarios with --explain to see WHY the model chose
 different answers across variants — see the suggested commands printed
@@ -35,10 +36,10 @@ def main() -> None:
     p.add_argument("results_csv", help="Path to results CSV from a prior run.")
     p.add_argument("--threshold", type=float, default=0.8,
                    help="Per-scenario spread threshold (default: 0.8).")
-    p.add_argument("--input", default="test_variants_first200.csv",
-                   help="Source input CSV to filter (default: test_variants_first200.csv).")
+    p.add_argument("--input", default="scenarios/test_variants_first200.csv",
+                   help="Source input CSV to filter (default: scenarios/test_variants_first200.csv).")
     p.add_argument("--output", default=None,
-                   help="Output filtered CSV path. Default: filtered_high_spread_<N>.csv.")
+                   help="Output filtered CSV path. Default: scenarios/filtered_high_spread_<N>.csv.")
     args = p.parse_args()
 
     results_path = Path(args.results_csv)
@@ -93,7 +94,7 @@ def main() -> None:
         kept = [r for r in reader if r["scenario_id"] in flagged_set]
 
     output_path = Path(args.output) if args.output \
-        else Path(f"filtered_high_spread_{len(flagged)}.csv")
+        else Path("scenarios") / f"filtered_high_spread_{len(flagged)}.csv"
     with output_path.open("w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames, quoting=csv.QUOTE_ALL)
         writer.writeheader()

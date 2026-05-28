@@ -280,7 +280,7 @@ def parse_response(response, latency_ms: int, explain: bool = False) -> dict:
         **base,
         "answer": "",
         "explanation": "",
-        "error": f"unexpected output: {raw[:100]}",
+        "error": f"unexpected output: {raw}",
     }
 
 

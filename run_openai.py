@@ -6,6 +6,7 @@ import asyncio
 import csv
 import json
 import os
+import re
 import sys
 import time
 import uuid
@@ -63,6 +64,12 @@ class ConfigError(RuntimeError):
     pass
 
 
+# OpenAI reasoning models (o-series, gpt-5*) accept `reasoning.effort`;
+# chat models (gpt-4o*, gpt-4-turbo, gpt-3.5-*, ...) 400 on it. Naming pattern
+# is stable enough to gate on client-side — the SDK does not pre-validate.
+REASONING_MODEL_RE = re.compile(r"^(o\d|gpt-5)")
+
+
 def preflight(config: Config) -> Config:
     """Validate env + flag combinations. Returns a possibly-corrected Config."""
     if not os.environ.get("OPENAI_API_KEY"):
@@ -71,6 +78,14 @@ def preflight(config: Config) -> Config:
         )
     if not Path(config.input).exists():
         raise ConfigError(f"input CSV not found: {config.input}")
+
+    if config.thinking == "on" and not REASONING_MODEL_RE.match(config.model):
+        raise ConfigError(
+            f"--thinking on requires a reasoning model (o-series or gpt-5*); "
+            f"{config.model!r} is a chat model and the Responses API will "
+            f"reject 'reasoning.effort' for it. Either drop --thinking on or "
+            f"pick a reasoning model (e.g. o4-mini, gpt-5-mini)."
+        )
 
     if config.thinking == "off" and config.reasoning_effort != "medium":
         # medium is the default; only warn if user set it explicitly while

@@ -18,7 +18,7 @@ Always activate the venv first: `source .venv/bin/activate`.
 - A working invocation:
   ```
   python run_claude.py \
-      --input test_variants_first200.csv \
+      --input scenarios/test_variants_first200.csv \
       --model claude-haiku-4-5-20251001 \
       --thinking off \
       --n 10 \
@@ -26,7 +26,7 @@ Always activate the venv first: `source .venv/bin/activate`.
   ```
 - Smoke-test a config without burning credits: add `--limit 1 --n 1 --concurrency 1`.
 
-API key lives in `.env` (gitignored). Output CSVs land in `results/` and are gitignored — commit summary tables only.
+API key lives in `.env` (gitignored). Input CSVs live in `scenarios/`, run-output CSVs in `results/`, and HTML reports in `reports/`. All three directories are committed — the data is part of the project record, not local-only scratch.
 
 ## Input schema
 
@@ -54,7 +54,7 @@ Working invocation:
 
 ```
 python run_openai.py \
-    --input test_variants_first200.csv \
+    --input scenarios/test_variants_first200.csv \
     --model gpt-4o-mini \
     --thinking off \
     --n 10 \
@@ -65,7 +65,7 @@ For reasoning models (o-series, GPT-5):
 
 ```
 python run_openai.py \
-    --input test_variants_first200.csv \
+    --input scenarios/test_variants_first200.csv \
     --model o4-mini \
     --thinking on \
     --reasoning-effort medium \

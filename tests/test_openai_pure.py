@@ -172,3 +172,22 @@ def test_preflight_returns_config_unchanged_when_ok(monkeypatch, tmp_input_csv):
     cfg = _cfg(input=str(tmp_input_csv), thinking="off",
                reasoning_effort="medium")  # medium is the default; no warning
     assert preflight(cfg) == cfg
+
+
+@pytest.mark.parametrize("chat_model", ["gpt-4o-mini", "gpt-4o", "gpt-4-turbo", "gpt-3.5-turbo"])
+def test_preflight_rejects_thinking_on_with_chat_model(
+    monkeypatch, tmp_input_csv, chat_model
+):
+    monkeypatch.setenv("OPENAI_API_KEY", "x")
+    cfg = _cfg(input=str(tmp_input_csv), model=chat_model, thinking="on")
+    with pytest.raises(ConfigError, match="reasoning model"):
+        preflight(cfg)
+
+
+@pytest.mark.parametrize("reasoning_model", ["o1", "o3-mini", "o4-mini", "gpt-5-mini", "gpt-5"])
+def test_preflight_accepts_thinking_on_with_reasoning_model(
+    monkeypatch, tmp_input_csv, reasoning_model
+):
+    monkeypatch.setenv("OPENAI_API_KEY", "x")
+    cfg = _cfg(input=str(tmp_input_csv), model=reasoning_model, thinking="on")
+    assert preflight(cfg) == cfg

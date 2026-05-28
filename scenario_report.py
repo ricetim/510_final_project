@@ -14,12 +14,17 @@ Notes:
     - scenario_id matching is exact-string. The dataset uses 5-digit zero-padded
       IDs like "00051"; "51" will not match.
     - --scenario-file is one ID per line, blanks ignored.
-    - Default output path: scenario_report_<N>.html in the CWD.
+    - Default output path: reports/scenario_report_<model>_<ids>.html, anchored
+      to the script's parent directory (not CWD) so reports always land in
+      the project's reports/ dir regardless of where you invoke from. <ids>
+      is dash-joined when the list is short and condensed to
+      <first>-to-<last>-<N>sc when joining would exceed 80 chars.
 """
 
 import argparse
 import csv
 import html as _html
+import re
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -27,6 +32,38 @@ from pathlib import Path
 
 def esc(value) -> str:
     return _html.escape(str(value) if value is not None else "")
+
+
+def _sanitize_for_filename(value: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9._-]", "_", value)
+    return cleaned or "unknown"
+
+
+def default_output_path(found_scenarios: list[str], rows: list[dict]) -> Path:
+    model = next((r.get("model", "") for r in rows if r.get("model")), "")
+    model_part = _sanitize_for_filename(model)
+    sorted_sids = sorted(found_scenarios)
+    if not sorted_sids:
+        sid_part = "empty"
+    else:
+        joined = "-".join(sorted_sids)
+        sid_part = joined if len(joined) <= 80 \
+            else f"{sorted_sids[0]}-to-{sorted_sids[-1]}-{len(sorted_sids)}sc"
+    return Path(__file__).resolve().parent / "reports" \
+        / f"scenario_report_{model_part}_{sid_part}.html"
+
+
+def resolve_non_clobbering(path: Path) -> Path:
+    """Return `path` if free, else append `_2`, `_3`, ... until a free name."""
+    if not path.exists():
+        return path
+    stem, suffix, parent = path.stem, path.suffix, path.parent
+    i = 2
+    while True:
+        candidate = parent / f"{stem}_{i}{suffix}"
+        if not candidate.exists():
+            return candidate
+        i += 1
 
 
 def build_html(by_scenario: dict, requested: list[str], results_path: Path) -> str:
@@ -175,7 +212,7 @@ def main() -> None:
     p.add_argument(
         "--output",
         default=None,
-        help="Output HTML path. Default: scenario_report_<N>.html.",
+        help="Output HTML path. Default: reports/scenario_report_<model>_<ids>.html.",
     )
     args = p.parse_args()
 
@@ -218,11 +255,18 @@ def main() -> None:
     for r in rows:
         by_scenario[r["scenario_id"]][(r["race_variant"], r["income_variant"])].append(r)
 
-    output_path = (
+    requested_output = (
         Path(args.output)
         if args.output
-        else Path(f"scenario_report_{len(scenarios)}.html")
+        else default_output_path(list(by_scenario.keys()), rows)
     )
+    output_path = resolve_non_clobbering(requested_output)
+    if output_path != requested_output:
+        print(
+            f"warning: {requested_output} exists; writing to {output_path} instead",
+            file=sys.stderr,
+        )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(build_html(by_scenario, scenarios, results_path), encoding="utf-8")
 
     n_rows = sum(len(v) for s in by_scenario.values() for v in s.values())
