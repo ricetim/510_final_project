@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<title>Per-group divergence from consensus</title>
+<style>
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+       max-width: 1200px; margin: 2em auto; padding: 0 1em; color: #222; }
+h1 { font-size: 1.55em; margin-bottom: 0.2em; }
+h2 { font-size: 1.2em; margin-top: 2.2em; border-bottom: 2px solid #333;
+     padding-bottom: 0.3em; }
+.meta { color: #666; font-size: 0.9em; margin-bottom: 1.5em; }
+.note { color: #555; font-size: 0.92em; max-width: 86ch; margin: 0.5em 0 1em 0; }
+.note p { margin: 0.5em 0; }
+.note ul { margin: 0.3em 0 0.6em 0; padding-left: 1.5em; }
+.note li { margin: 0.15em 0; }
+.note em { color: #333; font-style: normal; font-weight: 500; }
+table.rates { border-collapse: collapse; width: 100%; max-width: 1040px;
+              font-size: 0.92em; margin: 0.5em 0 1em 0; }
+table.rates th, table.rates td { border: 1px solid #ddd; padding: 4px 8px;
+                                  vertical-align: middle; }
+table.rates thead th { background: #efefef; text-align: left; font-weight: 600; }
+table.rates thead th.numhead { text-align: right; width: 6%; }
+table.rates tbody th { text-align: left; font-weight: 500; background: #f7f7f7;
+                       width: 22%; }
+table.rates td.num { text-align: right; font-variant-numeric: tabular-nums;
+                     width: 6%; }
+.bar-cell { position: relative; height: 22px; min-width: 280px; background: #fafafa; }
+.bar-cell.signed { background: #f5f5f5; }
+.bar-cell .midline { position: absolute; left: 50%; top: 0; bottom: 0; width: 1px;
+                     background: #888; z-index: 1; }
+.bar { position: absolute; top: 0; bottom: 0; }
+.bar-label { position: absolute; left: 50%; top: 3px; transform: translateX(-50%);
+             font-variant-numeric: tabular-nums; font-size: 0.85em; color: #222;
+             text-shadow: 0 0 3px white, 0 0 2px white; z-index: 2; }
+.bar-cell:not(.signed) .bar-label { left: 8px; transform: none; }
+</style></head><body>
+<h1>Per-group divergence from consensus &mdash; contested scenarios</h1>
+<div class="meta">Source: <code>results/claude-haiku-4-5-20251001_text_think-off_n5_explain-no_scenarios-00001-00500_recovered.csv</code> &middot;
+Model: <code>claude-haiku-4-5-20251001</code> &middot;
+85 contested of 484 full-coverage scenarios</div>
+
+<div class="note">
+<p><strong>Method:</strong></p>
+<ul>
+<li>A scenario is <em>contested</em> if its 15 demographic variants
+don&rsquo;t unanimously agree on Yes vs No. (~80% of scenarios are
+unanimous and get filtered out &mdash; they carry no signal.)</li>
+<li>For each group we compute the group&rsquo;s yes-rate over its own
+replicates, and compare against the <em>leave-one-out consensus</em>:
+the yes-rate over every replicate in the scenario <strong>not</strong>
+in this group. This is the &ldquo;others' opinion of this scenario&rdquo;
+that the group is being measured against.</li>
+<li>Two metrics per group:
+<ul>
+<li><em>mean &vert;group &minus; others&vert;</em>: how far the group
+sits from the others&rsquo; consensus on average. 0 = always tracks
+consensus; higher = consistently out of step (in either direction). The
+bar saturates at 0.5.</li>
+<li><em>mean (group &minus; others)</em>: signed bias. Positive (blue)
+= group is more permissive (more Yes) than the rest. Negative (red) =
+group is stricter (more No).</li>
+</ul></li>
+<li><em>n</em> = number of contested scenarios that contributed to the
+group&rsquo;s averages.</li>
+</ul>
+<p><strong>Reading the two columns together:</strong> A large
+&vert;distance&vert; with a near-zero signed bias means the group
+disagrees with consensus often but in <em>both</em> directions
+(sometimes more permissive, sometimes stricter). A large
+&vert;distance&vert; with a strong same-sign bias means the group
+reliably leans one way.</p>
+</div>
+
+<h2>Per income tier (3 groups, pooling across race)</h2>
+<table class="rates"><thead><tr><th>group</th><th>mean |group &minus; others| (distance from consensus)</th><th>mean (group &minus; others) &mdash; signed bias</th><th class="numhead">n</th></tr></thead><tbody><tr><th>low</th><td><div class="bar-cell"><div class="bar" style="width:46%;background:hsl(220, 60%, 75%);"></div><span class="bar-label">0.231</span></div></td><td><div class="bar-cell signed"><div class="midline"></div><div class="bar" style="left:50%;width:14.5%;background:hsl(220, 60%, 84%);"></div><span class="bar-label">+0.145</span></div></td><td class="num">85</td></tr><tr><th>high</th><td><div class="bar-cell"><div class="bar" style="width:46%;background:hsl(220, 60%, 75%);"></div><span class="bar-label">0.228</span></div></td><td><div class="bar-cell signed"><div class="midline"></div><div class="bar" style="right:50%;width:16.7%;background:hsl(0, 60%, 82%);"></div><span class="bar-label">-0.167</span></div></td><td class="num">85</td></tr><tr><th>middle</th><td><div class="bar-cell"><div class="bar" style="width:29%;background:hsl(220, 60%, 84%);"></div><span class="bar-label">0.144</span></div></td><td><div class="bar-cell signed"><div class="midline"></div><div class="bar" style="left:50%;width:2.1%;background:hsl(220, 60%, 98%);"></div><span class="bar-label">+0.021</span></div></td><td class="num">85</td></tr></tbody></table>
+
+<h2>Per race (5 groups, pooling across income)</h2>
+<table class="rates"><thead><tr><th>group</th><th>mean |group &minus; others| (distance from consensus)</th><th>mean (group &minus; others) &mdash; signed bias</th><th class="numhead">n</th></tr></thead><tbody><tr><th>east asian</th><td><div class="bar-cell"><div class="bar" style="width:53%;background:hsl(220, 60%, 71%);"></div><span class="bar-label">0.263</span></div></td><td><div class="bar-cell signed"><div class="midline"></div><div class="bar" style="right:50%;width:12.3%;background:hsl(0, 60%, 86%);"></div><span class="bar-label">-0.123</span></div></td><td class="num">85</td></tr><tr><th>black</th><td><div class="bar-cell"><div class="bar" style="width:52%;background:hsl(220, 60%, 71%);"></div><span class="bar-label">0.259</span></div></td><td><div class="bar-cell signed"><div class="midline"></div><div class="bar" style="left:50%;width:18.8%;background:hsl(220, 60%, 79%);"></div><span class="bar-label">+0.188</span></div></td><td class="num">85</td></tr><tr><th>white</th><td><div class="bar-cell"><div class="bar" style="width:47%;background:hsl(220, 60%, 74%);"></div><span class="bar-label">0.233</span></div></td><td><div class="bar-cell signed"><div class="midline"></div><div class="bar" style="right:50%;width:5.0%;background:hsl(0, 60%, 94%);"></div><span class="bar-label">-0.050</span></div></td><td class="num">85</td></tr><tr><th>indigenous</th><td><div class="bar-cell"><div class="bar" style="width:44%;background:hsl(220, 60%, 76%);"></div><span class="bar-label">0.218</span></div></td><td><div class="bar-cell signed"><div class="midline"></div><div class="bar" style="right:50%;width:3.7%;background:hsl(0, 60%, 96%);"></div><span class="bar-label">-0.037</span></div></td><td class="num">85</td></tr><tr><th>latino</th><td><div class="bar-cell"><div class="bar" style="width:40%;background:hsl(220, 60%, 78%);"></div><span class="bar-label">0.198</span></div></td><td><div class="bar-cell signed"><div class="midline"></div><div class="bar" style="left:50%;width:2.2%;background:hsl(220, 60%, 98%);"></div><span class="bar-label">+0.022</span></div></td><td class="num">85</td></tr></tbody></table>
+
+<h2>Per (race, income) variant (15 groups)</h2>
+<table class="rates"><thead><tr><th>group</th><th>mean |group &minus; others| (distance from consensus)</th><th>mean (group &minus; others) &mdash; signed bias</th><th class="numhead">n</th></tr></thead><tbody><tr><th>east asian / high</th><td><div class="bar-cell"><div class="bar" style="width:74%;background:hsl(220, 60%, 59%);"></div><span class="bar-label">0.371</span></div></td><td><div class="bar-cell signed"><div class="midline"></div><div class="bar" style="right:50%;width:23.3%;background:hsl(0, 60%, 74%);"></div><span class="bar-label">-0.233</span></div></td><td class="num">85</td></tr><tr><th>black / low</th><td><div class="bar-cell"><div class="bar" style="width:66%;background:hsl(220, 60%, 64%);"></div><span class="bar-label">0.331</span></div></td><td><div class="bar-cell signed"><div class="midline"></div><div class="bar" style="left:50%;width:20.4%;background:hsl(220, 60%, 78%);"></div><span class="bar-label">+0.204</span></div></td><td class="num">85</td></tr><tr><th>white / high</th><td><div class="bar-cell"><div class="bar" style="width:65%;background:hsl(220, 60%, 64%);"></div><span class="bar-label">0.326</span></div></td><td><div class="bar-cell signed"><div class="midline"></div><div class="bar" style="right:50%;width:15.3%;background:hsl(0, 60%, 83%);"></div><span class="bar-label">-0.153</span></div></td><td class="num">85</td></tr><tr><th>indigenous / low</th><td><div class="bar-cell"><div class="bar" style="width:63%;background:hsl(220, 60%, 65%);"></div><span class="bar-label">0.316</span></div></td><td><div class="bar-cell signed"><div class="midline"></div><div class="bar" style="left:50%;width:7.9%;background:hsl(220, 60%, 91%);"></div><span class="bar-label">+0.079</span></div></td><td class="num">85</td></tr><tr><th>indigenous / high</th><td><div class="bar-cell"><div class="bar" style="width:59%;background:hsl(220, 60%, 67%);"></div><span class="bar-label">0.297</span></div></td><td><div class="bar-cell signed"><div class="midline"></div><div class="bar" style="right:50%;width:18.5%;background:hsl(0, 60%, 80%);"></div><span class="bar-label">-0.185</span></div></td><td class="num">85</td></tr><tr><th>black / middle</th><td><div class="bar-cell"><div class="bar" style="width:59%;background:hsl(220, 60%, 67%);"></div><span class="bar-label">0.297</span></div></td><td><div class="bar-cell signed"><div class="midline"></div><div class="bar" style="left:50%;width:20.3%;background:hsl(220, 60%, 78%);"></div><span class="bar-label">+0.203</span></div></td><td class="num">85</td></tr><tr><th>east asian / middle</th><td><div class="bar-cell"><div class="bar" style="width:58%;background:hsl(220, 60%, 68%);"></div><span class="bar-label">0.292</span></div></td><td><div class="bar-cell signed"><div class="midline"></div><div class="bar" style="right:50%;width:12.7%;background:hsl(0, 60%, 86%);"></div><span class="bar-label">-0.127</span></div></td><td class="num">85</td></tr><tr><th>black / high</th><td><div class="bar-cell"><div class="bar" style="width:58%;background:hsl(220, 60%, 68%);"></div><span class="bar-label">0.291</span></div></td><td><div class="bar-cell signed"><div class="midline"></div><div class="bar" style="left:50%;width:6.0%;background:hsl(220, 60%, 93%);"></div><span class="bar-label">+0.060</span></div></td><td class="num">85</td></tr><tr><th>white / low</th><td><div class="bar-cell"><div class="bar" style="width:56%;background:hsl(220, 60%, 69%);"></div><span class="bar-label">0.280</span></div></td><td><div class="bar-cell signed"><div class="midline"></div><div class="bar" style="left:50%;width:5.4%;background:hsl(220, 60%, 94%);"></div><span class="bar-label">+0.054</span></div></td><td class="num">85</td></tr><tr><th>white / middle</th><td><div class="bar-cell"><div class="bar" style="width:55%;background:hsl(220, 60%, 70%);"></div><span class="bar-label">0.274</span></div></td><td><div class="bar-cell signed"><div class="midline"></div><div class="bar" style="right:50%;width:3.2%;background:hsl(0, 60%, 97%);"></div><span class="bar-label">-0.032</span></div></td><td class="num">85</td></tr><tr><th>latino / low</th><td><div class="bar-cell"><div class="bar" style="width:54%;background:hsl(220, 60%, 70%);"></div><span class="bar-label">0.271</span></div></td><td><div class="bar-cell signed"><div class="midline"></div><div class="bar" style="left:50%;width:12.0%;background:hsl(220, 60%, 87%);"></div><span class="bar-label">+0.120</span></div></td><td class="num">85</td></tr><tr><th>latino / middle</th><td><div class="bar-cell"><div class="bar" style="width:54%;background:hsl(220, 60%, 71%);"></div><span class="bar-label">0.268</span></div></td><td><div class="bar-cell signed"><div class="midline"></div><div class="bar" style="left:50%;width:2.8%;background:hsl(220, 60%, 97%);"></div><span class="bar-label">+0.028</span></div></td><td class="num">85</td></tr><tr><th>latino / high</th><td><div class="bar-cell"><div class="bar" style="width:53%;background:hsl(220, 60%, 71%);"></div><span class="bar-label">0.266</span></div></td><td><div class="bar-cell signed"><div class="midline"></div><div class="bar" style="right:50%;width:9.3%;background:hsl(0, 60%, 90%);"></div><span class="bar-label">-0.093</span></div></td><td class="num">85</td></tr><tr><th>indigenous / middle</th><td><div class="bar-cell"><div class="bar" style="width:53%;background:hsl(220, 60%, 71%);"></div><span class="bar-label">0.263</span></div></td><td><div class="bar-cell signed"><div class="midline"></div><div class="bar" style="left:50%;width:0.9%;background:hsl(220, 60%, 99%);"></div><span class="bar-label">+0.009</span></div></td><td class="num">85</td></tr><tr><th>east asian / low</th><td><div class="bar-cell"><div class="bar" style="width:51%;background:hsl(220, 60%, 72%);"></div><span class="bar-label">0.253</span></div></td><td><div class="bar-cell signed"><div class="midline"></div><div class="bar" style="left:50%;width:4.4%;background:hsl(220, 60%, 95%);"></div><span class="bar-label">+0.044</span></div></td><td class="num">85</td></tr></tbody></table>
+
+</body></html>

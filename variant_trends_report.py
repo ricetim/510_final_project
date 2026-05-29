@@ -1,34 +1,48 @@
 #!/usr/bin/env python3
 """Find which demographic variants answer together (and which oppose).
 
-Takes a results CSV and emits a single HTML report with four views:
+Takes a results CSV and emits a single HTML report. The report covers
+four views (the fourth is omitted in compressed-axis modes — see below):
 
-  1. Pairwise agreement matrix — 15x15 heatmap of "fraction of scenarios on
+  1. Pairwise agreement matrix — NxN heatmap of "fraction of scenarios on
      which these two variants gave the same majority answer." Diagonal = 1.
-  2. Spearman correlation matrix — 15x15 heatmap of rank correlation on
+  2. Spearman correlation matrix — NxN heatmap of rank correlation on
      per-scenario yes-rates. Diverging color scale: blue = answer together,
      red = answer opposite. Captures partial agreement that #1 misses.
   3. Hierarchical clustering dendrogram — average linkage on (1 - Spearman)
      distances. Reveals natural demographic blocs at multiple resolutions.
   4. Race-vs-income decomposition — three numbers: mean pair-distance for
      same-race pairs, same-income pairs, and fully-different pairs. Tells
-     you whether the bias is mostly race-shaped or income-shaped.
+     you whether the bias is mostly race-shaped or income-shaped. Only
+     shown for --axis both (the default); meaningless once one axis is
+     collapsed.
 
 Usage:
     python variant_trends_report.py <results_csv> [--output report.html]
                                                   [--include-unanimous]
+                                                  [--axis both|race|income]
 
-Scenarios where all 15 variants give the SAME majority answer (everyone
+--axis controls how variants are formed:
+  - both   (default): 15 crossed (race, income) variants — original view.
+  - race:   collapse to 5 race categories, pooling all 3 income tiers per
+            race. Each scenario's yes-rate for "white" is computed from
+            #Yes / (#Yes + #No) across all 15 replicates (5 reps × 3
+            income tiers), so the underlying-replicate noise model is
+            preserved (no double-averaging).
+  - income: collapse to 3 income categories, pooling all 5 races per
+            income tier. Same pooling logic, 25 replicates per cell.
+
+Scenarios where all N variants give the SAME majority answer (everyone
 Yes, or everyone No) carry no demographic signal — they pull every pair's
 agreement / correlation toward each other without telling you anything
 about bias. By default they're dropped before the matrices are built;
 pass --include-unanimous to keep them.
 
-Default output: reports/variant_trends_<model>.html, anchored to the
-script's parent dir (not CWD), no-clobber.
+Default output: reports/variant_trends_<model>[_axis-<race|income>].html,
+anchored to the script's parent dir (not CWD), no-clobber.
 
 No numpy/scipy required. Everything is implemented in pure Python because
-n=15 variants is small enough that O(n^2) and O(n^3) routines run in
+N <= 15 variants is small enough that O(n^2) and O(n^3) routines run in
 microseconds.
 """
 
@@ -50,6 +64,20 @@ VARIANTS: list[tuple[str, str]] = [(r, i) for r in RACES for i in INCOMES]
 VARIANT_LABELS = [f"{r} / {i.replace(' income', '')}" for r, i in VARIANTS]
 
 
+def axis_categories(axis: str) -> tuple[list, list[str]]:
+    """Return (category_keys, display_labels) for the given axis.
+
+    - axis="both"   -> 15 (race, income) tuples + the cross-product labels.
+    - axis="race"   -> 5 race strings + the same as labels.
+    - axis="income" -> 3 income strings + labels with " income" stripped.
+    """
+    if axis == "race":
+        return list(RACES), list(RACES)
+    if axis == "income":
+        return list(INCOMES), [i.replace(" income", "") for i in INCOMES]
+    return list(VARIANTS), list(VARIANT_LABELS)
+
+
 def esc(value) -> str:
     return _html.escape(str(value) if value is not None else "")
 
@@ -58,9 +86,10 @@ def _sanitize_for_filename(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]", "_", value) or "unknown"
 
 
-def default_output_path(model: str) -> Path:
+def default_output_path(model: str, axis: str = "both") -> Path:
+    suffix = "" if axis == "both" else f"_axis-{axis}"
     return Path(__file__).resolve().parent / "reports" \
-        / f"variant_trends_{_sanitize_for_filename(model)}.html"
+        / f"variant_trends_{_sanitize_for_filename(model)}{suffix}.html"
 
 
 def resolve_non_clobbering(path: Path) -> Path:
@@ -79,42 +108,63 @@ def resolve_non_clobbering(path: Path) -> Path:
 # Matrix construction
 # ---------------------------------------------------------------------------
 
-def load_yes_rate_matrix(path: Path) -> tuple[list[str], dict[tuple[str, str], dict[str, float]]]:
-    """Return (scenario_ids_sorted, variant -> {scenario_id: yes_rate}).
+def load_yes_rate_matrix(path: Path, axis: str = "both") -> tuple[list[str], dict, list]:
+    """Return (scenario_ids_sorted, variant -> {scenario_id: yes_rate}, variant_keys).
 
-    Only scenarios where ALL 15 variants have at least one Yes/No reply are
+    Only scenarios where ALL N variants have at least one Yes/No reply are
     included — anything else would create asymmetric NaNs that infect the
     pairwise math downstream. This is conservative; on the recovered haiku
-    CSV it keeps ~95% of scenarios.
+    CSV it keeps ~95% of scenarios for axis=both, more for collapsed axes
+    (since each collapsed cell pools several rows).
+
+    Pooling note: for the collapsed axes the yes-rate for one cell on one
+    scenario is computed from ALL underlying replicates (5 reps * 3 incomes
+    = 15 for axis=race; 5 reps * 5 races = 25 for axis=income). This avoids
+    double-averaging — if you averaged the three already-summarized
+    yes-rates instead, scenarios where recovery yielded different replicate
+    counts per cell would get silently re-weighted.
     """
+    variant_keys, _ = axis_categories(axis)
+    if axis == "race":
+        keyfn = lambda r: r["race_variant"]
+    elif axis == "income":
+        keyfn = lambda r: r["income_variant"]
+    else:
+        keyfn = lambda r: (r["race_variant"], r["income_variant"])
+    valid = set(variant_keys)
+
     with path.open(newline="") as f:
         rows = list(csv.DictReader(f))
 
     # variant -> scenario -> [answers]
-    raw: dict[tuple[str, str], dict[str, list[str]]] = defaultdict(lambda: defaultdict(list))
+    raw: dict = defaultdict(lambda: defaultdict(list))
     all_scenarios: set[str] = set()
     for r in rows:
         if r["answer"] not in ("Yes", "No"):
             continue
-        key = (r["race_variant"], r["income_variant"])
-        if key not in set(VARIANTS):
+        # Guard: drop any row whose race/income isn't in the canonical lists
+        # so a stray demographic typo in the CSV can't mask a missing cell.
+        if r["race_variant"] not in RACES or r["income_variant"] not in INCOMES:
             continue
-        raw[key][r["scenario_id"]].append(r["answer"])
+        k = keyfn(r)
+        if k not in valid:
+            continue
+        raw[k][r["scenario_id"]].append(r["answer"])
         all_scenarios.add(r["scenario_id"])
 
     # Compute yes-rates
-    rates: dict[tuple[str, str], dict[str, float]] = {v: {} for v in VARIANTS}
-    for v in VARIANTS:
+    rates: dict = {v: {} for v in variant_keys}
+    for v in variant_keys:
         for sid, answers in raw[v].items():
             rates[v][sid] = sum(1 for a in answers if a == "Yes") / len(answers)
 
-    # Keep only scenarios where all 15 variants have data.
+    # Keep only scenarios where every variant has data.
     complete = sorted(
         sid for sid in all_scenarios
-        if all(sid in rates[v] for v in VARIANTS)
+        if all(sid in rates[v] for v in variant_keys)
     )
-    rates = {v: {sid: rates[v][sid] for sid in complete} for v in VARIANTS}
-    return complete, rates
+    rates = {v: {sid: rates[v][sid] for sid in complete} for v in variant_keys}
+    return complete, rates, variant_keys
 
 
 # ---------------------------------------------------------------------------
@@ -129,14 +179,14 @@ def majority(yes_rate: float) -> str | None:
     return None  # 0.5 = ambiguous; exclude from this method
 
 
-def is_unanimous(rates: dict[tuple[str, str], dict[str, float]], sid: str) -> bool:
-    """True if all 15 variants give the same Yes/No majority on this scenario.
+def is_unanimous(rates: dict, sid: str, variant_keys: list) -> bool:
+    """True if every variant gives the same Yes/No majority on this scenario.
 
     A variant with an exactly-50/50 yes-rate (no majority) prevents the
     scenario from being unanimous — we can't say it agrees with anything.
     """
     seen: set[str] = set()
-    for v in VARIANTS:
+    for v in variant_keys:
         m = majority(rates[v][sid])
         if m is None:
             return False
@@ -145,11 +195,12 @@ def is_unanimous(rates: dict[tuple[str, str], dict[str, float]], sid: str) -> bo
 
 
 def agreement_matrix(scenarios: list[str],
-                     rates: dict[tuple[str, str], dict[str, float]]) -> list[list[float]]:
-    n = len(VARIANTS)
+                     rates: dict,
+                     variant_keys: list) -> list[list[float]]:
+    n = len(variant_keys)
     out = [[0.0] * n for _ in range(n)]
-    for i, vi in enumerate(VARIANTS):
-        for j, vj in enumerate(VARIANTS):
+    for i, vi in enumerate(variant_keys):
+        for j, vj in enumerate(variant_keys):
             if i == j:
                 out[i][j] = 1.0
                 continue
@@ -199,9 +250,10 @@ def pearson(xs: list[float], ys: list[float]) -> float:
 
 
 def spearman_matrix(scenarios: list[str],
-                    rates: dict[tuple[str, str], dict[str, float]]) -> list[list[float]]:
-    n = len(VARIANTS)
-    vecs = [[rates[v][sid] for sid in scenarios] for v in VARIANTS]
+                    rates: dict,
+                    variant_keys: list) -> list[list[float]]:
+    n = len(variant_keys)
+    vecs = [[rates[v][sid] for sid in scenarios] for v in variant_keys]
     ranks = [midranks(v) for v in vecs]
     out = [[0.0] * n for _ in range(n)]
     for i in range(n):
@@ -483,13 +535,18 @@ table.matrix th.rowmean-head, table.matrix td.rowmean {
 
 def build_html(scenarios: list[str], rates, agree, corr, linkage, deco,
                results_path: Path, model: str,
-               n_complete: int, unanimous_dropped: int) -> str:
+               n_complete: int, unanimous_dropped: int,
+               axis: str, display_labels: list[str]) -> str:
+    n = len(display_labels)
+    axis_title = {"both": "15 race × income variants",
+                  "race": "5 race categories (pooled across income)",
+                  "income": "3 income categories (pooled across race)"}[axis]
     parts: list[str] = []
     parts.append(f"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
-<title>Variant trends</title>
+<title>Variant trends — {esc(axis_title)}</title>
 <style>{CSS}</style></head><body>""")
-    parts.append("<h1>Variant trend analysis</h1>")
+    parts.append(f"<h1>Variant trend analysis &mdash; {esc(axis_title)}</h1>")
     filter_note = (
         f"{unanimous_dropped} unanimous-consensus scenarios dropped"
         if unanimous_dropped else "unanimous-consensus scenarios included"
@@ -497,6 +554,7 @@ def build_html(scenarios: list[str], rates, agree, corr, linkage, deco,
     parts.append(
         f'<div class="meta">Source: <code>{esc(results_path)}</code> · '
         f'Model: <code>{esc(model)}</code> · '
+        f'Axis: <code>{esc(axis)}</code> · '
         f'{len(scenarios)} of {n_complete} full-coverage scenarios used '
         f'({esc(filter_note)})</div>'
     )
@@ -522,7 +580,7 @@ def build_html(scenarios: list[str], rates, agree, corr, linkage, deco,
         "<li>Diagonal is trivially 1.00 &mdash; a variant always agrees with "
         "itself.</li>"
         "</ul>"
-        "<p><strong>Row mean (excl. self):</strong> Average of the 14 "
+        f"<p><strong>Row mean (excl. self):</strong> Average of the {n - 1} "
         "off-diagonal cells in each row. Quantifies how aligned this variant "
         "is with the others on average. A <em>low</em> row mean flags an "
         "outlier variant whose majorities frequently disagree with the rest; "
@@ -541,7 +599,7 @@ def build_html(scenarios: list[str], rates, agree, corr, linkage, deco,
         '<span><span class="swatch" style="background:hsl(220,60%,45%)"></span>1.0 (always agree)</span>'
         '</div>'
     )
-    parts.append(render_matrix(agree, VARIANT_LABELS, hsl_for_agreement))
+    parts.append(render_matrix(agree, display_labels, hsl_for_agreement))
 
     # Method 2
     parts.append("<h2>2. Spearman rank correlation</h2>")
@@ -572,7 +630,7 @@ def build_html(scenarios: list[str], rates, agree, corr, linkage, deco,
         "lockstep across scenarios &mdash; a stronger statement than "
         "&ldquo;they happened to land on the same side of 0.5 three "
         "times.&rdquo;</p>"
-        "<p><strong>Row mean (excl. self):</strong> Average of the 14 "
+        f"<p><strong>Row mean (excl. self):</strong> Average of the {n - 1} "
         "off-diagonal Spearman values in each row. Quantifies how strongly "
         "this variant&rsquo;s yes-rate co-varies with the others on average. "
         "A low row mean flags a variant that marches to its own beat; a "
@@ -590,7 +648,7 @@ def build_html(scenarios: list[str], rates, agree, corr, linkage, deco,
         '<span><span class="swatch" style="background:hsl(220,60%,45%)"></span>+1</span>'
         '</div>'
     )
-    parts.append(render_matrix(corr, VARIANT_LABELS, hsl_for_corr))
+    parts.append(render_matrix(corr, display_labels, hsl_for_corr))
 
     # Method 3
     parts.append("<h2>3. Hierarchical clustering dendrogram</h2>")
@@ -606,7 +664,7 @@ def build_html(scenarios: list[str], rates, agree, corr, linkage, deco,
         "= 1 &minus; Spearman &rho;(<em>v<sub>i</sub></em>, "
         "<em>v<sub>j</sub></em>). Variants with &rho; = +1 are at distance "
         "0; with &rho; = 0, distance 1; with &rho; = &minus;1, distance 2.</li>"
-        "<li>Start with 15 singleton clusters (one per variant).</li>"
+        f"<li>Start with {n} singleton clusters (one per variant).</li>"
         "<li>Find the two closest clusters and merge them; record the "
         "merge height (the distance at which they joined).</li>"
         "<li>Repeat until one cluster remains.</li>"
@@ -635,68 +693,66 @@ def build_html(scenarios: list[str], rates, agree, corr, linkage, deco,
         "</ul>"
         "</div>"
     )
-    # Build distance matrix (1 - corr).
-    distance = [[1 - corr[i][j] for j in range(len(VARIANTS))]
-                for i in range(len(VARIANTS))]
-    parts.append(dendrogram_svg(linkage, VARIANT_LABELS, width=1100, height=520))
+    parts.append(dendrogram_svg(linkage, display_labels, width=1100, height=520))
 
-    # Method 4
-    parts.append("<h2>4. Race-vs-income decomposition</h2>")
-    parts.append(
-        '<div class="note">'
-        "<p><strong>What this shows:</strong> A single-axis summary "
-        "answering &ldquo;is the model&rsquo;s variation primarily "
-        "race-shaped or income-shaped?&rdquo;</p>"
-        "<p><strong>How it&rsquo;s computed:</strong></p>"
-        "<ul>"
-        "<li>Enumerate all 15 &middot; 14 / 2 = 105 unordered pairs of "
-        "variants.</li>"
-        "<li>Classify each pair by what its two members share:"
-        "<ul>"
-        f"<li><em>Same race, different income</em>: 5 races &times; "
-        f"C(3, 2) = <strong>{deco['n_same_race']}</strong> pairs.</li>"
-        f"<li><em>Same income, different race</em>: 3 incomes &times; "
-        f"C(5, 2) = <strong>{deco['n_same_income']}</strong> pairs.</li>"
-        f"<li><em>Different race AND different income</em>: "
-        f"<strong>{deco['n_different']}</strong> pairs (the remainder).</li>"
-        "</ul></li>"
-        "<li>For each group, compute the mean of "
-        "distance(<em>v<sub>i</sub></em>, <em>v<sub>j</sub></em>) = "
-        "1 &minus; Spearman &rho;.</li>"
-        "</ul>"
-        "<p><strong>How to read it:</strong> The group with the smallest "
-        "mean distance is the tightest cluster. If same-race pairs are "
-        "tighter than same-income pairs, the model&rsquo;s variation lives "
-        "mostly along the race axis &mdash; variants sharing a race answer "
-        "more similarly than variants sharing an income. The ratio in the "
-        "verdict line below the three cells tells you whether the dominance "
-        "is strong (ratio &raquo; 1) or marginal (ratio near 1).</p>"
-        "</div>"
-    )
-    parts.append('<div class="deco">')
-    for key, label in (
-        ("same_race", "Same race, different income"),
-        ("same_income", "Same income, different race"),
-        ("different", "Different race AND income"),
-    ):
+    # Method 4 — race-vs-income decomposition only applies to the crossed view.
+    if axis == "both" and deco is not None:
+        parts.append("<h2>4. Race-vs-income decomposition</h2>")
         parts.append(
-            f'<div class="cell"><div class="num">{deco[key]:.3f}</div>'
-            f'<div class="lbl">{esc(label)}</div></div>'
+            '<div class="note">'
+            "<p><strong>What this shows:</strong> A single-axis summary "
+            "answering &ldquo;is the model&rsquo;s variation primarily "
+            "race-shaped or income-shaped?&rdquo;</p>"
+            "<p><strong>How it&rsquo;s computed:</strong></p>"
+            "<ul>"
+            "<li>Enumerate all 15 &middot; 14 / 2 = 105 unordered pairs of "
+            "variants.</li>"
+            "<li>Classify each pair by what its two members share:"
+            "<ul>"
+            f"<li><em>Same race, different income</em>: 5 races &times; "
+            f"C(3, 2) = <strong>{deco['n_same_race']}</strong> pairs.</li>"
+            f"<li><em>Same income, different race</em>: 3 incomes &times; "
+            f"C(5, 2) = <strong>{deco['n_same_income']}</strong> pairs.</li>"
+            f"<li><em>Different race AND different income</em>: "
+            f"<strong>{deco['n_different']}</strong> pairs (the remainder).</li>"
+            "</ul></li>"
+            "<li>For each group, compute the mean of "
+            "distance(<em>v<sub>i</sub></em>, <em>v<sub>j</sub></em>) = "
+            "1 &minus; Spearman &rho;.</li>"
+            "</ul>"
+            "<p><strong>How to read it:</strong> The group with the smallest "
+            "mean distance is the tightest cluster. If same-race pairs are "
+            "tighter than same-income pairs, the model&rsquo;s variation lives "
+            "mostly along the race axis &mdash; variants sharing a race answer "
+            "more similarly than variants sharing an income. The ratio in the "
+            "verdict line below the three cells tells you whether the dominance "
+            "is strong (ratio &raquo; 1) or marginal (ratio near 1).</p>"
+            "</div>"
         )
-    parts.append("</div>")
+        parts.append('<div class="deco">')
+        for key, label in (
+            ("same_race", "Same race, different income"),
+            ("same_income", "Same income, different race"),
+            ("different", "Different race AND income"),
+        ):
+            parts.append(
+                f'<div class="cell"><div class="num">{deco[key]:.3f}</div>'
+                f'<div class="lbl">{esc(label)}</div></div>'
+            )
+        parts.append("</div>")
 
-    # One-line verdict.
-    sr, si = deco["same_race"], deco["same_income"]
-    if not math.isnan(sr) and not math.isnan(si) and sr != si:
-        if sr < si:
-            ratio = si / sr if sr > 0 else float("inf")
-            verdict = (f"<strong>Race dominates:</strong> same-race pairs are "
-                       f"{ratio:.2f}× tighter than same-income pairs.")
-        else:
-            ratio = sr / si if si > 0 else float("inf")
-            verdict = (f"<strong>Income dominates:</strong> same-income pairs are "
-                       f"{ratio:.2f}× tighter than same-race pairs.")
-        parts.append(f'<div class="note">{verdict}</div>')
+        # One-line verdict.
+        sr, si = deco["same_race"], deco["same_income"]
+        if not math.isnan(sr) and not math.isnan(si) and sr != si:
+            if sr < si:
+                ratio = si / sr if sr > 0 else float("inf")
+                verdict = (f"<strong>Race dominates:</strong> same-race pairs are "
+                           f"{ratio:.2f}× tighter than same-income pairs.")
+            else:
+                ratio = sr / si if si > 0 else float("inf")
+                verdict = (f"<strong>Income dominates:</strong> same-income pairs are "
+                           f"{ratio:.2f}× tighter than same-race pairs.")
+            parts.append(f'<div class="note">{verdict}</div>')
 
     parts.append("</body></html>")
     return "\n".join(parts)
@@ -709,12 +765,18 @@ def main() -> None:
     )
     p.add_argument("results_csv", help="Path to results CSV.")
     p.add_argument("--output", default=None,
-                   help="Output HTML path. Default: reports/variant_trends_<model>.html.")
+                   help="Output HTML path. Default: "
+                        "reports/variant_trends_<model>[_axis-<race|income>].html.")
     p.add_argument("--include-unanimous", action="store_true",
-                   help="Keep scenarios where all 15 variants give the same "
+                   help="Keep scenarios where every variant gives the same "
                         "majority answer (dropped by default — no demographic "
                         "signal but they pull every pairwise correlation toward "
                         "each other).")
+    p.add_argument("--axis", choices=("both", "race", "income"), default="both",
+                   help="Variant axis. both = 15 (race, income) variants "
+                        "(default). race = 5 race categories, pooling across "
+                        "income. income = 3 income categories, pooling across "
+                        "race.")
     args = p.parse_args()
 
     results_path = Path(args.results_csv)
@@ -722,15 +784,17 @@ def main() -> None:
         print(f"error: results CSV not found: {results_path}", file=sys.stderr)
         sys.exit(2)
 
-    scenarios, rates = load_yes_rate_matrix(results_path)
+    scenarios, rates, variant_keys = load_yes_rate_matrix(results_path, args.axis)
+    _, display_labels = axis_categories(args.axis)
     n_complete = len(scenarios)
 
     unanimous_count = 0
     if not args.include_unanimous:
-        unanimous_set = {sid for sid in scenarios if is_unanimous(rates, sid)}
+        unanimous_set = {sid for sid in scenarios
+                         if is_unanimous(rates, sid, variant_keys)}
         unanimous_count = len(unanimous_set)
         scenarios = [sid for sid in scenarios if sid not in unanimous_set]
-        rates = {v: {sid: rates[v][sid] for sid in scenarios} for v in VARIANTS}
+        rates = {v: {sid: rates[v][sid] for sid in scenarios} for v in variant_keys}
         if unanimous_count:
             print(
                 f"dropped {unanimous_count} unanimous-consensus scenarios "
@@ -754,24 +818,27 @@ def main() -> None:
             (r.get("model", "") for r in csv.DictReader(f) if r.get("model")), ""
         )
 
-    agree = agreement_matrix(scenarios, rates)
-    corr = spearman_matrix(scenarios, rates)
-    distance = [[1 - corr[i][j] for j in range(len(VARIANTS))]
-                for i in range(len(VARIANTS))]
+    n_var = len(variant_keys)
+    agree = agreement_matrix(scenarios, rates, variant_keys)
+    corr = spearman_matrix(scenarios, rates, variant_keys)
+    distance = [[1 - corr[i][j] for j in range(n_var)] for i in range(n_var)]
     linkage = average_linkage(distance)
-    deco = decomposition(distance)
+    deco = decomposition(distance) if args.axis == "both" else None
 
-    requested = Path(args.output) if args.output else default_output_path(model)
+    requested = Path(args.output) if args.output else default_output_path(model, args.axis)
     output_path = resolve_non_clobbering(requested)
     if output_path != requested:
         print(f"warning: {requested} exists; writing to {output_path} instead",
               file=sys.stderr)
 
     html = build_html(scenarios, rates, agree, corr, linkage, deco,
-                      results_path, model, n_complete, unanimous_count)
+                      results_path, model, n_complete, unanimous_count,
+                      args.axis, display_labels)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(html, encoding="utf-8")
-    print(f"wrote 4-method trend report ({len(scenarios)} scenarios) to {output_path}",
+    n_methods = 4 if args.axis == "both" else 3
+    print(f"wrote {n_methods}-method trend report (axis={args.axis}, "
+          f"{len(scenarios)} scenarios) to {output_path}",
           file=sys.stderr)
 
 
