@@ -27,9 +27,10 @@ import html as _html
 import sys
 from pathlib import Path
 
+from collections import defaultdict
+
 from variant_trends_report import (
-    RACES, INCOMES, VARIANTS,
-    load_yes_rate_matrix, is_unanimous, majority,
+    RACES, INCOMES, VARIANTS, majority,
     _sanitize_for_filename, resolve_non_clobbering,
 )
 
@@ -61,6 +62,83 @@ def text_color(yr: float) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Partial-coverage loader (local — variant_trends_report's loader drops any
+# scenario where one of the 15 cells has no Yes/No, but for the gallery we
+# WANT to show those so the user can see WHICH cells are missing and why).
+# ---------------------------------------------------------------------------
+
+def load_partial_yes_rates(path) -> tuple[list[str], dict]:
+    """Return (scenarios_sorted, rates) without dropping incomplete scenarios.
+
+    A scenario is included if at least ONE (race, income) cell has at least
+    one Yes/No reply. Cells without any Yes/No simply don't appear in the
+    inner dict — callers should test `sid in rates[v]` before reading.
+    """
+    raw: dict = defaultdict(lambda: defaultdict(list))
+    all_sids: set[str] = set()
+    import csv as _csv  # local alias to avoid shadowing
+    with open(path, newline="") as f:
+        for r in _csv.DictReader(f):
+            if r["answer"] not in ("Yes", "No"):
+                continue
+            if r["race_variant"] not in RACES or r["income_variant"] not in INCOMES:
+                continue
+            v = (r["race_variant"], r["income_variant"])
+            raw[v][r["scenario_id"]].append(r["answer"])
+            all_sids.add(r["scenario_id"])
+
+    rates: dict = {v: {} for v in VARIANTS}
+    for v in VARIANTS:
+        for sid, answers in raw[v].items():
+            rates[v][sid] = sum(1 for a in answers if a == "Yes") / len(answers)
+    return sorted(all_sids), rates
+
+
+def coverage_of(rates: dict, sid: str) -> int:
+    """How many of the 15 cells have any Yes/No data for this scenario."""
+    return sum(1 for v in VARIANTS if sid in rates[v])
+
+
+def is_unanimous_partial(rates: dict, sid: str) -> bool:
+    """All covered cells give the same Yes/No majority on this scenario.
+
+    Ambiguous cells (yes-rate exactly 0.5) prevent unanimity. If a scenario
+    has zero covered cells, returns False (we want to surface it as a data
+    issue, not silently drop it).
+    """
+    seen: set[str] = set()
+    for v in VARIANTS:
+        if sid not in rates[v]:
+            continue
+        m = majority(rates[v][sid])
+        if m is None:
+            return False
+        seen.add(m)
+    if not seen:
+        return False
+    return len(seen) == 1
+
+
+def spread_of(rates: dict, sid: str) -> float:
+    """Max-minus-min yes-rate across the cells with data (0.0 if 0 or 1 cell)."""
+    ys = [rates[v][sid] for v in VARIANTS if sid in rates[v]]
+    if len(ys) < 2:
+        return 0.0
+    return max(ys) - min(ys)
+
+
+def render_coverage_badge(coverage: int) -> str:
+    if coverage == 15:
+        return ('<span class="cov-badge cov-full">'
+                '15 / 15 covered</span>')
+    if coverage >= 12:
+        return (f'<span class="cov-badge cov-partial">'
+                f'{coverage} / 15 covered &mdash; partial</span>')
+    return (f'<span class="cov-badge cov-low">'
+            f'{coverage} / 15 covered &mdash; low coverage</span>')
+
+
+# ---------------------------------------------------------------------------
 # SVG mini-heatmap (race columns x income rows, with axis labels)
 # ---------------------------------------------------------------------------
 
@@ -79,20 +157,42 @@ def mini_heatmap_svg(rates, sid, w=300, h=140) -> str:
             f'font-size="10" fill="#444">{esc(race)}</text>'
         )
     # Cells — each one is a clickable <g> with data attrs that the JS filter reads.
+    # Cells without Yes/No data render as a gray dashed square ("—") so the
+    # missing-data structure is visible at a glance.
     for ii, inc in enumerate(INCOMES):
         for ri, race in enumerate(RACES):
-            yr = rates[(race, inc)][sid]
             x, y = ri * cw, ii * ch
-            parts.append(
-                f'<g class="cell-click" data-race="{esc(race)}" '
-                f'data-income="{esc(inc)}" onclick="filterTile(this)">'
-                f'<rect x="{x:.1f}" y="{y:.1f}" width="{cw:.1f}" height="{ch:.1f}" '
-                f'fill="{yr_color(yr)}" stroke="#fff" stroke-width="1"/>'
-                f'<text x="{x + cw / 2:.1f}" y="{y + ch / 2 + 4:.1f}" '
-                f'text-anchor="middle" fill="{text_color(yr)}" font-size="11" '
-                f'font-variant-numeric="tabular-nums" pointer-events="none">{yr:.2f}</text>'
-                f'</g>'
-            )
+            v = (race, inc)
+            has_data = sid in rates[v]
+            if has_data:
+                yr = rates[v][sid]
+                parts.append(
+                    f'<g class="cell-click" data-race="{esc(race)}" '
+                    f'data-income="{esc(inc)}" onclick="filterTile(this)">'
+                    f'<rect x="{x:.1f}" y="{y:.1f}" width="{cw:.1f}" height="{ch:.1f}" '
+                    f'fill="{yr_color(yr)}" stroke="#fff" stroke-width="1"/>'
+                    f'<text x="{x + cw / 2:.1f}" y="{y + ch / 2 + 4:.1f}" '
+                    f'text-anchor="middle" fill="{text_color(yr)}" font-size="11" '
+                    f'font-variant-numeric="tabular-nums" pointer-events="none">{yr:.2f}</text>'
+                    f'</g>'
+                )
+            else:
+                # Missing cell: gray fill + a diagonal line + em-dash.
+                # Still clickable so the user can filter to the (race, income)
+                # group and see the error/refusal explanations underneath.
+                parts.append(
+                    f'<g class="cell-click cell-missing" data-race="{esc(race)}" '
+                    f'data-income="{esc(inc)}" onclick="filterTile(this)">'
+                    f'<rect x="{x:.1f}" y="{y:.1f}" width="{cw:.1f}" height="{ch:.1f}" '
+                    f'fill="#ececec" stroke="#fff" stroke-width="1"/>'
+                    f'<line x1="{x + 2:.1f}" y1="{y + 2:.1f}" '
+                    f'x2="{x + cw - 2:.1f}" y2="{y + ch - 2:.1f}" '
+                    f'stroke="#cfcfcf" stroke-width="1" pointer-events="none"/>'
+                    f'<text x="{x + cw / 2:.1f}" y="{y + ch / 2 + 4:.1f}" '
+                    f'text-anchor="middle" fill="#888" font-size="11" '
+                    f'pointer-events="none">&#8212;</text>'
+                    f'</g>'
+                )
         short = inc.replace(" income", "")
         parts.append(
             f'<text x="{w + 6:.1f}" y="{ii * ch + ch / 2 + 4:.1f}" '
@@ -106,10 +206,13 @@ def mini_heatmap_svg(rates, sid, w=300, h=140) -> str:
 # Per-scenario tile + color-key legend
 # ---------------------------------------------------------------------------
 
-def vote_counts(rates, sid) -> tuple[int, int, int]:
-    """Return (n_yes, n_no, n_ambig) across the 15 variants for this scenario."""
-    n_yes = n_no = n_ambig = 0
+def vote_counts(rates, sid) -> tuple[int, int, int, int]:
+    """Return (n_yes, n_no, n_ambig, n_missing) across the 15 variants."""
+    n_yes = n_no = n_ambig = n_missing = 0
     for v in VARIANTS:
+        if sid not in rates[v]:
+            n_missing += 1
+            continue
         m = majority(rates[v][sid])
         if m == "Yes":
             n_yes += 1
@@ -117,7 +220,7 @@ def vote_counts(rates, sid) -> tuple[int, int, int]:
             n_no += 1
         else:
             n_ambig += 1
-    return n_yes, n_no, n_ambig
+    return n_yes, n_no, n_ambig, n_missing
 
 
 def render_color_key(steps: int = 11, swatch_w: int = 36, swatch_h: int = 26) -> str:
@@ -148,11 +251,25 @@ def render_color_key(steps: int = 11, swatch_w: int = 36, swatch_h: int = 26) ->
         '</div>'
     )
     parts.append(
+        '<div class="key-legend">'
+        '<span><span class="swatch" style="background:#ececec; color:#888;'
+        ' width:36px; height:18px; display:inline-flex; align-items:center;'
+        ' justify-content:center;">&mdash;</span> '
+        '<strong>missing cell</strong> &mdash; no Yes/No replicate (cell was '
+        'all errors, blanks, or refusals; or the variant was queued but never '
+        'completed)</span>'
+        '<span><span class="cov-badge cov-full">15 / 15</span> '
+        '<span class="cov-badge cov-partial">13 / 15 partial</span> '
+        '<span class="cov-badge cov-low">8 / 15 low</span> '
+        '&mdash; coverage badges shown next to each scenario&rsquo;s spread.</span>'
+        '</div>'
+    )
+    parts.append(
         '<div class="click-hint">'
-        '<strong>Tip:</strong> click any cell in a tile to filter that '
-        'scenario&rsquo;s explanations to just that <code>(race / income)</code> '
-        'group. Click the same cell again, or the <code>clear filter</code> '
-        'button, to show all rows again.'
+        '<strong>Tip:</strong> click any cell in a tile (including missing ones) '
+        'to filter that scenario&rsquo;s explanations to just that '
+        '<code>(race / income)</code> group. Click the same cell again, or '
+        'the <code>clear filter</code> button, to show all rows again.'
         '</div>'
     )
     parts.append('</div>')
@@ -216,7 +333,8 @@ def render_explanations(explanations: list[tuple]) -> str:
 
 def render_tile(sid, rates, orig, spreads,
                 explanations: list[tuple]) -> str:
-    n_yes, n_no, n_ambig = vote_counts(rates, sid)
+    n_yes, n_no, n_ambig, n_missing = vote_counts(rates, sid)
+    coverage = 15 - n_missing
     text = orig.get(sid, "") or "(no original scenario text available)"
     ambig_part = f" &middot; {n_ambig} split" if n_ambig else ""
     return (
@@ -231,6 +349,7 @@ def render_tile(sid, rates, orig, spreads,
         f'<span class="no-pill">{n_no} No</span>'
         f'{ambig_part}'
         f'</span>'
+        f'{render_coverage_badge(coverage)}'
         f'</div>'
         f'<div class="orig">{esc(text)}</div>'
         f'{mini_heatmap_svg(rates, sid)}'
@@ -312,6 +431,17 @@ table.expl-tbl tr.exp-row > td.r-exp {
 g.cell-click { cursor: pointer; }
 g.cell-click:hover rect { stroke: #444; stroke-width: 2; }
 g.cell-click.active rect { stroke: #111; stroke-width: 3; }
+g.cell-missing:hover rect { stroke: #888; }
+g.cell-missing.active rect { stroke: #444; }
+
+.cov-badge { display: inline-block; padding: 1px 8px; border-radius: 9px;
+             font-size: 0.85em; margin-left: 6px; vertical-align: middle;
+             white-space: nowrap; }
+.cov-badge.cov-full { background: hsl(120, 50%, 92%); color: #2a6b2a; }
+.cov-badge.cov-partial { background: hsl(45, 75%, 88%); color: #8a6a00;
+                         font-weight: 500; }
+.cov-badge.cov-low { background: hsl(0, 70%, 92%); color: #b13030;
+                     font-weight: 600; }
 button.clear-link { background: white; border: 1px solid #aaa;
                     padding: 1px 8px; border-radius: 9px; font-size: 0.88em;
                     color: #225; cursor: pointer; font-family: inherit;
@@ -336,7 +466,12 @@ function filterTile(g) {
 
   const filterKey = race + '|' + income;
   if (det.dataset.filter === filterKey) {
+    // Same cell clicked twice — collapse the details AND clear the filter,
+    // so a second click is the natural "I'm done with this group" gesture.
+    // (The 'clear filter' button beside the summary still just clears
+    // without collapsing — leaves the table visible for further exploration.)
     clearTileFilter(tile);
+    det.open = false;
     return;
   }
 
@@ -387,12 +522,11 @@ function clearTileFilter(tile) {
 """
 
 
-def build_html(results_path, model, n_total, n_contested,
+def build_html(results_path, model,
+               n_in_csv, n_full, n_partial, n_candidates,
                shown_sids, rates, orig, spreads,
                explanations_by_sid: dict,
                sort_mode, include_unanimous) -> str:
-    extra = (" (unanimous included)" if include_unanimous
-             else "")
     tiles = "".join(
         render_tile(sid, rates, orig, spreads,
                     explanations_by_sid.get(sid, []))
@@ -404,18 +538,24 @@ def build_html(results_path, model, n_total, n_contested,
         if n_with_expl else
         " &middot; no explanations in this run"
     )
+    filter_note = (" &middot; <code>--include-unanimous</code> active "
+                   "(fully-covered unanimous scenarios kept)"
+                   if include_unanimous else
+                   " &middot; fully-covered unanimous scenarios filtered out")
     return f"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
-<title>Contested scenarios &mdash; gallery</title>
+<title>Contested-scenario gallery</title>
 <style>{CSS}</style>
 <script>{JS}</script>
 </head><body>
 <h1>Contested-scenario gallery</h1>
 <div class="meta">Source: <code>{esc(results_path)}</code> &middot;
-Model: <code>{esc(model)}</code> &middot;
-showing <strong>{len(shown_sids)}</strong> of {n_contested} contested
-({n_total} full-coverage in source){esc(extra)} &middot;
-sort: <code>{esc(sort_mode)}</code>{expl_note}</div>
+Model: <code>{esc(model)}</code><br>
+<strong>{n_in_csv}</strong> scenarios in CSV
+&mdash; {n_full} full-coverage, {n_partial} partial
+&middot; showing <strong>{len(shown_sids)}</strong>
+of {n_candidates} candidates after filtering
+&middot; sort: <code>{esc(sort_mode)}</code>{filter_note}{expl_note}</div>
 
 {render_color_key()}
 
@@ -453,30 +593,43 @@ def main() -> None:
         print(f"error: results CSV not found: {results_path}", file=sys.stderr)
         sys.exit(2)
 
-    scenarios, rates, vk = load_yes_rate_matrix(results_path, axis="both")
-    n_total = len(scenarios)
+    all_sids, rates = load_partial_yes_rates(results_path)
+    n_in_csv = len(all_sids)
 
+    coverage_by_sid = {s: coverage_of(rates, s) for s in all_sids}
+    n_full = sum(1 for c in coverage_by_sid.values() if c == 15)
+    n_partial = n_in_csv - n_full
+
+    # Default filter: drop fully-covered unanimous scenarios — they carry no
+    # signal. Partially-covered scenarios are ALWAYS kept (the data-quality
+    # issue itself is the signal we want surfaced).
     if args.include_unanimous:
-        candidates = scenarios
+        candidates = list(all_sids)
     else:
-        candidates = [s for s in scenarios if not is_unanimous(rates, s, vk)]
-    n_contested = len(candidates)
+        candidates = [
+            s for s in all_sids
+            if not (coverage_by_sid[s] == 15 and is_unanimous_partial(rates, s))
+        ]
+    n_candidates = len(candidates)
 
     if not candidates:
         print("error: no scenarios to show after filtering.", file=sys.stderr)
         sys.exit(2)
 
-    spreads = {}
-    for s in candidates:
-        ys = [rates[v][s] for v in VARIANTS]
-        spreads[s] = max(ys) - min(ys)
+    spreads = {s: spread_of(rates, s) for s in candidates}
 
     if args.sort == "spread":
-        ordered = sorted(candidates, key=lambda s: -spreads[s])
+        # Primary: spread desc.
+        # Secondary: more-damaged (more missing) first within tied spread —
+        # surfaces partial-coverage scenarios near the top of their band.
+        # Tertiary: scenario_id asc, for stable ordering.
+        candidates.sort(key=lambda s: (-spreads[s],
+                                       -(15 - coverage_by_sid[s]),
+                                       s))
     else:
-        ordered = sorted(candidates)
+        candidates.sort()
 
-    shown = ordered if args.top_n is None else ordered[: args.top_n]
+    shown = candidates if args.top_n is None else candidates[: args.top_n]
 
     with results_path.open(newline="") as f:
         raw_rows = list(csv.DictReader(f))
@@ -512,7 +665,8 @@ def main() -> None:
               file=sys.stderr)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(
-        build_html(results_path, model, n_total, n_contested,
+        build_html(results_path, model,
+                   n_in_csv, n_full, n_partial, n_candidates,
                    shown, rates, orig, spreads,
                    explanations_by_sid,
                    args.sort, args.include_unanimous),
