@@ -100,14 +100,16 @@ def resolve_non_clobbering(path: Path) -> Path:
 # Matrix construction
 # ---------------------------------------------------------------------------
 
-def load_yes_rate_matrix(path: Path, axis: str = "both") -> tuple[list[str], dict, list]:
+def load_yes_rate_matrix(path: Path, axis: str = "both",
+                         require_complete: bool = True
+                         ) -> tuple[list[str], dict, list]:
     """Return (scenario_ids_sorted, variant -> {scenario_id: yes_rate}, variant_keys).
 
-    Only scenarios where ALL N variants have at least one Yes/No reply are
-    included — anything else would create asymmetric NaNs that infect the
-    pairwise math downstream. This is conservative; on the recovered haiku
-    CSV it keeps ~95% of scenarios for axis=both, more for collapsed axes
-    (since each collapsed cell pools several rows).
+    With require_complete=True (default), only scenarios where every variant
+    has at least one Yes/No reply are kept. With require_complete=False, any
+    scenario with at least one cell populated is kept and callers must
+    tolerate `sid not in rates[v]` for the missing cells (the matrix
+    builders here do — they fall back to pairwise complete observations).
 
     Pooling note: for the collapsed axes the yes-rate for one cell on one
     scenario is computed from ALL underlying replicates (5 reps * 3 incomes
@@ -150,13 +152,15 @@ def load_yes_rate_matrix(path: Path, axis: str = "both") -> tuple[list[str], dic
         for sid, answers in raw[v].items():
             rates[v][sid] = sum(1 for a in answers if a == "Yes") / len(answers)
 
-    # Keep only scenarios where every variant has data.
-    complete = sorted(
-        sid for sid in all_scenarios
-        if all(sid in rates[v] for v in variant_keys)
-    )
-    rates = {v: {sid: rates[v][sid] for sid in complete} for v in variant_keys}
-    return complete, rates, variant_keys
+    if require_complete:
+        kept = sorted(
+            sid for sid in all_scenarios
+            if all(sid in rates[v] for v in variant_keys)
+        )
+        rates = {v: {sid: rates[v][sid] for sid in kept} for v in variant_keys}
+    else:
+        kept = sorted(all_scenarios)
+    return kept, rates, variant_keys
 
 
 # ---------------------------------------------------------------------------
@@ -172,23 +176,30 @@ def majority(yes_rate: float) -> str | None:
 
 
 def is_unanimous(rates: dict, sid: str, variant_keys: list) -> bool:
-    """True if every variant gives the same Yes/No majority on this scenario.
-
-    A variant with an exactly-50/50 yes-rate (no majority) prevents the
-    scenario from being unanimous — we can't say it agrees with anything.
-    """
+    """True if every variant that has data on this scenario agrees on the
+    same Yes/No majority. Variants without data are skipped (the scenario
+    can still be unanimous over its covered subset). A variant with an
+    exactly-50/50 yes-rate (no majority) prevents unanimity; a scenario
+    with zero covered variants returns False (no signal to count)."""
     seen: set[str] = set()
     for v in variant_keys:
+        if sid not in rates[v]:
+            continue
         m = majority(rates[v][sid])
         if m is None:
             return False
         seen.add(m)
+    if not seen:
+        return False
     return len(seen) == 1
 
 
 def agreement_matrix(scenarios: list[str],
                      rates: dict,
                      variant_keys: list) -> list[list[float]]:
+    """Pairwise complete observations: each pair's count is built from
+    scenarios where BOTH variants have data and both have a defined Yes/No
+    majority (yes-rate != 0.5)."""
     n = len(variant_keys)
     out = [[0.0] * n for _ in range(n)]
     for i, vi in enumerate(variant_keys):
@@ -198,6 +209,8 @@ def agreement_matrix(scenarios: list[str],
                 continue
             agree = total = 0
             for sid in scenarios:
+                if sid not in rates[vi] or sid not in rates[vj]:
+                    continue
                 mi = majority(rates[vi][sid])
                 mj = majority(rates[vj][sid])
                 if mi is None or mj is None:
@@ -244,13 +257,27 @@ def pearson(xs: list[float], ys: list[float]) -> float:
 def spearman_matrix(scenarios: list[str],
                     rates: dict,
                     variant_keys: list) -> list[list[float]]:
+    """Pairwise complete observations: for each (i, j) pair we restrict to
+    scenarios where BOTH variants have data, rank within that subset, then
+    Pearson-correlate. Each pair can use a different scenario count."""
     n = len(variant_keys)
-    vecs = [[rates[v][sid] for sid in scenarios] for v in variant_keys]
-    ranks = [midranks(v) for v in vecs]
     out = [[0.0] * n for _ in range(n)]
-    for i in range(n):
-        for j in range(n):
-            out[i][j] = 1.0 if i == j else pearson(ranks[i], ranks[j])
+    for i, vi in enumerate(variant_keys):
+        for j, vj in enumerate(variant_keys):
+            if i == j:
+                out[i][j] = 1.0
+                continue
+            xs: list[float] = []
+            ys: list[float] = []
+            for sid in scenarios:
+                if sid not in rates[vi] or sid not in rates[vj]:
+                    continue
+                xs.append(rates[vi][sid])
+                ys.append(rates[vj][sid])
+            if len(xs) < 2:
+                out[i][j] = float("nan")
+                continue
+            out[i][j] = pearson(midranks(xs), midranks(ys))
     return out
 
 
@@ -343,6 +370,14 @@ table.matrix th.rowmean-head, table.matrix td.rowmean {
                   border: 1px solid #aaa; margin-right: 4px; }
 section.view { display: none; }
 section.view.active { display: block; }
+.panel-grid { display: grid; grid-template-columns: repeat(auto-fit,
+              minmax(560px, 1fr)); gap: 22px; margin: 14px 0 0 0; }
+.panel { background: #fff; border: 1px solid #ddd; border-radius: 4px;
+         padding: 10px 14px; min-width: 0; overflow-x: auto; }
+.panel h3 { margin: 0 0 2px 0; font-size: 1.05em; color: #222; }
+.panel .panel-meta { color: #666; font-size: 0.85em; margin-bottom: 8px; }
+.panel .panel-meta code { background: #f0f0f0; padding: 0 4px;
+                           border-radius: 3px; }
 .view-toggle { display: flex; gap: 8px; margin: 1.2em 0 0.4em 0; }
 .view-toggle button { font: inherit; background: white; border: 1px solid #aaa;
                       padding: 6px 14px; border-radius: 14px; cursor: pointer;
@@ -363,10 +398,65 @@ function showView(n, btn) {
 """
 
 
-def build_html(scenarios: list[str], rates, agree, corr,
-               results_path: Path, model: str,
-               n_complete: int, unanimous_dropped: int,
-               axis: str, display_labels: list[str]) -> str:
+def compute_panel(path: Path, axis: str, include_unanimous: bool) -> dict:
+    """Load + filter one CSV and compute its agreement & Spearman matrices.
+    Returns a dict ready to feed into build_html as one panel."""
+    scenarios, rates, variant_keys = load_yes_rate_matrix(
+        path, axis, require_complete=False)
+    n_total = len(scenarios)
+    unanimous_count = 0
+    if not include_unanimous:
+        unanimous_set = {sid for sid in scenarios
+                         if is_unanimous(rates, sid, variant_keys)}
+        unanimous_count = len(unanimous_set)
+        scenarios = [sid for sid in scenarios if sid not in unanimous_set]
+        rates = {v: {sid: rates[v][sid] for sid in scenarios if sid in rates[v]}
+                 for v in variant_keys}
+    if len(scenarios) < 5:
+        raise SystemExit(
+            f"error: only {len(scenarios)} scenarios remain after filtering "
+            f"in {path} — need at least 5. Try --include-unanimous.")
+    with path.open(newline="") as f:
+        model = next(
+            (r.get("model", "") for r in csv.DictReader(f) if r.get("model")), "")
+    return {
+        "path": path, "model": model,
+        "n_total": n_total, "n_used": len(scenarios),
+        "unanimous_count": unanimous_count,
+        "agree": agreement_matrix(scenarios, rates, variant_keys),
+        "corr": spearman_matrix(scenarios, rates, variant_keys),
+    }
+
+
+def _panel_meta(panel: dict) -> str:
+    note = (f"{panel['unanimous_count']} unanimous-consensus dropped"
+            if panel['unanimous_count'] else
+            "unanimous-consensus scenarios included")
+    return (
+        f'<div class="panel-meta">Source: <code>{esc(panel["path"])}</code><br>'
+        f'{panel["n_used"]} of {panel["n_total"]} scenarios used '
+        f'({esc(note)}; partial-coverage scenarios included; '
+        f'pairs use pairwise complete observations)</div>'
+    )
+
+
+def _render_panel_grid(panels: list[dict], matrix_key: str,
+                       display_labels: list[str], color_fn) -> str:
+    """Build a horizontal grid of one matrix per model panel."""
+    tiles = []
+    for panel in panels:
+        tiles.append(
+            '<div class="panel">'
+            f'<h3>{esc(panel["model"] or "(unknown model)")}</h3>'
+            f'{_panel_meta(panel)}'
+            f'{render_matrix(panel[matrix_key], display_labels, color_fn)}'
+            '</div>'
+        )
+    return '<div class="panel-grid">' + "".join(tiles) + '</div>'
+
+
+def build_html(panels: list[dict], axis: str,
+               display_labels: list[str]) -> str:
     n = len(display_labels)
     axis_title = {"both": "15 race × income variants",
                   "race": "5 race categories (pooled across income)",
@@ -378,16 +468,15 @@ def build_html(scenarios: list[str], rates, agree, corr,
 <style>{CSS}</style>
 <script>{JS}</script></head><body>""")
     parts.append(f"<h1>Variant trend analysis &mdash; {esc(axis_title)}</h1>")
-    filter_note = (
-        f"{unanimous_dropped} unanimous-consensus scenarios dropped"
-        if unanimous_dropped else "unanimous-consensus scenarios included"
-    )
+    if len(panels) == 1:
+        models_line = f'Model: <code>{esc(panels[0]["model"])}</code>'
+    else:
+        models_line = ('Models (side-by-side): '
+                       + ' &middot; '.join(
+                           f'<code>{esc(p["model"])}</code>' for p in panels))
     parts.append(
-        f'<div class="meta">Source: <code>{esc(results_path)}</code> · '
-        f'Model: <code>{esc(model)}</code> · '
-        f'Axis: <code>{esc(axis)}</code> · '
-        f'{len(scenarios)} of {n_complete} full-coverage scenarios used '
-        f'({esc(filter_note)})</div>'
+        f'<div class="meta">{models_line} &middot; '
+        f'Axis: <code>{esc(axis)}</code></div>'
     )
 
     parts.append(
@@ -440,7 +529,8 @@ def build_html(scenarios: list[str], rates, agree, corr,
         '<span><span class="swatch" style="background:hsl(220,60%,45%)"></span>1.0 (always agree)</span>'
         '</div>'
     )
-    parts.append(render_matrix(agree, display_labels, hsl_for_agreement))
+    parts.append(_render_panel_grid(panels, "agree", display_labels,
+                                    hsl_for_agreement))
     parts.append("</section>")
 
     # Method 2
@@ -491,7 +581,8 @@ def build_html(scenarios: list[str], rates, agree, corr,
         '<span><span class="swatch" style="background:hsl(220,60%,45%)"></span>+1</span>'
         '</div>'
     )
-    parts.append(render_matrix(corr, display_labels, hsl_for_corr))
+    parts.append(_render_panel_grid(panels, "corr", display_labels,
+                                    hsl_for_corr))
     parts.append("</section>")
 
     parts.append("</body></html>")
@@ -504,9 +595,14 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p.add_argument("results_csv", help="Path to results CSV.")
+    p.add_argument("--compare", default=None, metavar="CSV",
+                   help="Optional second results CSV. When provided, both "
+                        "models' matrices are rendered side-by-side in each "
+                        "plot section.")
     p.add_argument("--output", default=None,
                    help="Output HTML path. Default: "
-                        "reports/variant_trends_<model>[_axis-<race|income>].html.")
+                        "reports/variant_trends_<model>[_vs_<model2>]"
+                        "[_axis-<race|income>].html.")
     p.add_argument("--include-unanimous", action="store_true",
                    help="Keep scenarios where every variant gives the same "
                         "majority answer (dropped by default — no demographic "
@@ -519,62 +615,48 @@ def main() -> None:
                         "race.")
     args = p.parse_args()
 
-    results_path = Path(args.results_csv)
-    if not results_path.exists():
-        print(f"error: results CSV not found: {results_path}", file=sys.stderr)
-        sys.exit(2)
+    paths = [Path(args.results_csv)]
+    if args.compare:
+        paths.append(Path(args.compare))
+    for p_ in paths:
+        if not p_.exists():
+            print(f"error: results CSV not found: {p_}", file=sys.stderr)
+            sys.exit(2)
 
-    scenarios, rates, variant_keys = load_yes_rate_matrix(results_path, args.axis)
     _, display_labels = axis_categories(args.axis)
-    n_complete = len(scenarios)
-
-    unanimous_count = 0
-    if not args.include_unanimous:
-        unanimous_set = {sid for sid in scenarios
-                         if is_unanimous(rates, sid, variant_keys)}
-        unanimous_count = len(unanimous_set)
-        scenarios = [sid for sid in scenarios if sid not in unanimous_set]
-        rates = {v: {sid: rates[v][sid] for sid in scenarios} for v in variant_keys}
-        if unanimous_count:
+    panels = [compute_panel(p_, args.axis, args.include_unanimous)
+              for p_ in paths]
+    for panel in panels:
+        if panel["unanimous_count"]:
             print(
-                f"dropped {unanimous_count} unanimous-consensus scenarios "
-                f"({unanimous_count / n_complete:.0%} of {n_complete}); "
-                f"{len(scenarios)} remain. Use --include-unanimous to keep them.",
+                f"{panel['path'].name}: dropped {panel['unanimous_count']} "
+                f"unanimous-consensus scenarios "
+                f"({panel['unanimous_count'] / panel['n_total']:.0%} of "
+                f"{panel['n_total']}); {panel['n_used']} remain.",
                 file=sys.stderr,
             )
 
-    if len(scenarios) < 5:
-        print(
-            f"error: only {len(scenarios)} scenarios remain after filtering — "
-            "not enough signal for trend analysis. Need at least 5. "
-            "Try --include-unanimous if most scenarios were dropped.",
-            file=sys.stderr,
-        )
-        sys.exit(2)
-
-    # Read model name from any row for the title.
-    with results_path.open(newline="") as f:
-        model = next(
-            (r.get("model", "") for r in csv.DictReader(f) if r.get("model")), ""
-        )
-
-    agree = agreement_matrix(scenarios, rates, variant_keys)
-    corr = spearman_matrix(scenarios, rates, variant_keys)
-
-    requested = Path(args.output) if args.output else default_output_path(model, args.axis)
+    if args.output:
+        requested = Path(args.output)
+    elif len(panels) == 1:
+        requested = default_output_path(panels[0]["model"], args.axis)
+    else:
+        a = _sanitize_for_filename(panels[0]["model"] or "a")
+        b = _sanitize_for_filename(panels[1]["model"] or "b")
+        suffix = f"_axis-{args.axis}" if args.axis != "both" else ""
+        requested = (Path(__file__).resolve().parent / "reports"
+                     / f"variant_trends_{a}_vs_{b}{suffix}.html")
     output_path = resolve_non_clobbering(requested)
     if output_path != requested:
         print(f"warning: {requested} exists; writing to {output_path} instead",
               file=sys.stderr)
 
-    html = build_html(scenarios, rates, agree, corr,
-                      results_path, model, n_complete, unanimous_count,
-                      args.axis, display_labels)
+    html = build_html(panels, args.axis, display_labels)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(html, encoding="utf-8")
-    print(f"wrote trend report (axis={args.axis}, "
-          f"{len(scenarios)} scenarios) to {output_path}",
-          file=sys.stderr)
+    print(f"wrote trend report ({len(panels)} model"
+          f"{'s' if len(panels) != 1 else ''}, axis={args.axis}) "
+          f"to {output_path}", file=sys.stderr)
 
 
 if __name__ == "__main__":
