@@ -1,21 +1,13 @@
 #!/usr/bin/env python3
 """Find which demographic variants answer together (and which oppose).
 
-Takes a results CSV and emits a single HTML report. The report covers
-four views (the fourth is omitted in compressed-axis modes — see below):
+Takes a results CSV and emits a single HTML report with two views:
 
   1. Pairwise agreement matrix — NxN heatmap of "fraction of scenarios on
      which these two variants gave the same majority answer." Diagonal = 1.
   2. Spearman correlation matrix — NxN heatmap of rank correlation on
      per-scenario yes-rates. Diverging color scale: blue = answer together,
      red = answer opposite. Captures partial agreement that #1 misses.
-  3. Hierarchical clustering dendrogram — average linkage on (1 - Spearman)
-     distances. Reveals natural demographic blocs at multiple resolutions.
-  4. Race-vs-income decomposition — three numbers: mean pair-distance for
-     same-race pairs, same-income pairs, and fully-different pairs. Tells
-     you whether the bias is mostly race-shaped or income-shaped. Only
-     shown for --axis both (the default); meaningless once one axis is
-     collapsed.
 
 Usage:
     python variant_trends_report.py <results_csv> [--output report.html]
@@ -263,179 +255,6 @@ def spearman_matrix(scenarios: list[str],
 
 
 # ---------------------------------------------------------------------------
-# Method 3: hierarchical clustering (average linkage) + SVG dendrogram
-# ---------------------------------------------------------------------------
-
-def average_linkage(distance: list[list[float]]) -> list[tuple[int, int, float, int]]:
-    """Return linkage matrix [(left, right, height, total_size), ...].
-
-    Cluster ids 0..n-1 are leaves; ids n..2n-2 are internal nodes. The
-    distance table is mutated in place via Lance-Williams (average linkage).
-    """
-    n = len(distance)
-    # dist[(a,b)] for ordered (a<b in id, but ids are not contiguous so use raw)
-    dist: dict[tuple[int, int], float] = {}
-    for i in range(n):
-        for j in range(i + 1, n):
-            dist[(i, j)] = distance[i][j]
-
-    sizes = {i: 1 for i in range(n)}
-    active = list(range(n))
-    linkage: list[tuple[int, int, float, int]] = []
-    next_id = n
-
-    def key(a: int, b: int) -> tuple[int, int]:
-        return (a, b) if a < b else (b, a)
-
-    for _ in range(n - 1):
-        # Find closest pair among active clusters.
-        best = None
-        best_d = float("inf")
-        for a_idx in range(len(active)):
-            a = active[a_idx]
-            for b_idx in range(a_idx + 1, len(active)):
-                b = active[b_idx]
-                d = dist[key(a, b)]
-                if d < best_d:
-                    best_d = d
-                    best = (a, b)
-        assert best is not None
-        a, b = best
-        new_id = next_id
-        next_id += 1
-        new_size = sizes[a] + sizes[b]
-        linkage.append((a, b, best_d, new_size))
-
-        # Lance-Williams for average linkage:
-        # d(new, x) = (size_a * d(a,x) + size_b * d(b,x)) / (size_a + size_b)
-        for x in active:
-            if x == a or x == b:
-                continue
-            d_ax = dist[key(a, x)]
-            d_bx = dist[key(b, x)]
-            dist[key(new_id, x)] = (sizes[a] * d_ax + sizes[b] * d_bx) / new_size
-
-        sizes[new_id] = new_size
-        active.remove(a)
-        active.remove(b)
-        active.append(new_id)
-    return linkage
-
-
-def dendrogram_svg(linkage: list[tuple[int, int, float, int]],
-                   labels: list[str],
-                   width: int = 900, height: int = 480) -> str:
-    """Render a horizontal dendrogram as SVG. Leaves on the bottom, root on top."""
-    n = len(labels)
-    # Build tree: child_of[node] -> (left, right, height)
-    children: dict[int, tuple[int, int, float]] = {}
-    for i, (a, b, h, _) in enumerate(linkage):
-        children[n + i] = (a, b, h)
-
-    # Determine leaf order via in-order DFS of the merge tree.
-    leaf_order: list[int] = []
-
-    def dfs(node: int) -> None:
-        if node < n:
-            leaf_order.append(node)
-            return
-        a, b, _h = children[node]
-        dfs(a)
-        dfs(b)
-
-    root = n + len(linkage) - 1
-    dfs(root)
-
-    # Layout: x = leaf order position; y = merge height (root at top).
-    label_band = 130  # px reserved at the bottom for rotated labels
-    plot_h = height - label_band - 20
-    plot_w = width - 40
-    left_pad = 20
-
-    x_of_leaf = {leaf: left_pad + (i + 0.5) * plot_w / n for i, leaf in enumerate(leaf_order)}
-    max_h = max(h for _, _, h, _ in linkage) or 1.0
-
-    def y_of_height(h: float) -> float:
-        # h=0 at bottom (just above labels), h=max_h at top.
-        return 10 + (1 - h / max_h) * plot_h
-
-    # Compute x for each cluster (leaf or internal) by recursion.
-    x_of: dict[int, float] = dict(x_of_leaf)
-    for i, (a, b, _h, _) in enumerate(linkage):
-        x_of[n + i] = (x_of[a] + x_of[b]) / 2
-
-    parts: list[str] = []
-    parts.append(
-        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" '
-        f'class="dendrogram" font-family="sans-serif" font-size="11">'
-    )
-    # Lines
-    for i, (a, b, h, _) in enumerate(linkage):
-        xa, xb = x_of[a], x_of[b]
-        ya = y_of_height(children[a][2]) if a in children else y_of_height(0)
-        yb = y_of_height(children[b][2]) if b in children else y_of_height(0)
-        yh = y_of_height(h)
-        # Two vertical bars + one horizontal at merge height.
-        parts.append(f'<line x1="{xa:.1f}" y1="{ya:.1f}" x2="{xa:.1f}" y2="{yh:.1f}" stroke="#333" stroke-width="1.2"/>')
-        parts.append(f'<line x1="{xb:.1f}" y1="{yb:.1f}" x2="{xb:.1f}" y2="{yh:.1f}" stroke="#333" stroke-width="1.2"/>')
-        parts.append(f'<line x1="{xa:.1f}" y1="{yh:.1f}" x2="{xb:.1f}" y2="{yh:.1f}" stroke="#333" stroke-width="1.2"/>')
-
-    # Leaf labels (rotated -45°).
-    y_baseline = y_of_height(0) + 8
-    for leaf in leaf_order:
-        x = x_of_leaf[leaf]
-        parts.append(
-            f'<text x="{x:.1f}" y="{y_baseline:.1f}" text-anchor="end" '
-            f'transform="rotate(-45 {x:.1f} {y_baseline:.1f})">{esc(labels[leaf])}</text>'
-        )
-
-    # Y-axis ticks (distance = 1 - rho range).
-    for tick in (0.0, 0.25, 0.5, 0.75, 1.0):
-        if tick > max_h * 1.05:
-            continue
-        y = y_of_height(tick)
-        parts.append(f'<line x1="{left_pad - 5}" y1="{y:.1f}" x2="{left_pad}" y2="{y:.1f}" stroke="#666"/>')
-        parts.append(f'<text x="{left_pad - 8}" y="{y + 3:.1f}" text-anchor="end" fill="#666" font-size="10">{tick:.2f}</text>')
-
-    parts.append("</svg>")
-    return "".join(parts)
-
-
-# ---------------------------------------------------------------------------
-# Method 4: race-vs-income decomposition
-# ---------------------------------------------------------------------------
-
-def decomposition(distance: list[list[float]]) -> dict[str, float]:
-    """Average pairwise distance grouped by what's shared between the pair."""
-    same_race: list[float] = []
-    same_income: list[float] = []
-    different: list[float] = []
-    for i, vi in enumerate(VARIANTS):
-        for j, vj in enumerate(VARIANTS):
-            if i >= j:
-                continue
-            d = distance[i][j]
-            if vi[0] == vj[0]:
-                same_race.append(d)
-            elif vi[1] == vj[1]:
-                same_income.append(d)
-            else:
-                different.append(d)
-
-    def avg(xs: list[float]) -> float:
-        return sum(xs) / len(xs) if xs else float("nan")
-
-    return {
-        "same_race": avg(same_race),
-        "same_income": avg(same_income),
-        "different": avg(different),
-        "n_same_race": len(same_race),
-        "n_same_income": len(same_income),
-        "n_different": len(different),
-    }
-
-
-# ---------------------------------------------------------------------------
 # HTML rendering
 # ---------------------------------------------------------------------------
 
@@ -518,22 +337,33 @@ table.matrix th.rot > div > span { padding: 2px 4px; }
 table.matrix th.rowmean-head, table.matrix td.rowmean {
     border-left: 2px solid #444; font-weight: 600;
 }
-.dendrogram { background: #fafafa; border: 1px solid #ddd; max-width: 100%; }
-.deco { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1em;
-        margin: 1em 0 0.5em 0; }
-.deco .cell { background: #f7f7f7; padding: 0.8em 1em; border-left: 4px solid #888;
-              text-align: center; }
-.deco .cell .num { font-size: 1.6em; font-variant-numeric: tabular-nums;
-                   color: #1a4a8a; }
-.deco .cell .lbl { font-size: 0.85em; color: #555; margin-top: 0.3em; }
 .legend { display: inline-flex; gap: 1.2em; align-items: center; font-size: 0.85em;
           color: #555; margin: 0.5em 0; }
 .legend .swatch { display: inline-block; width: 18px; height: 12px; vertical-align: middle;
                   border: 1px solid #aaa; margin-right: 4px; }
+section.view { display: none; }
+section.view.active { display: block; }
+.view-toggle { display: flex; gap: 8px; margin: 1.2em 0 0.4em 0; }
+.view-toggle button { font: inherit; background: white; border: 1px solid #aaa;
+                      padding: 6px 14px; border-radius: 14px; cursor: pointer;
+                      color: #225; }
+.view-toggle button:hover { background: #eef; border-color: #225; }
+.view-toggle button.active { background: #225; color: white; border-color: #225; }
+"""
+
+JS = """
+function showView(n, btn) {
+  for (const s of document.querySelectorAll('section.view')) {
+    s.classList.toggle('active', s.dataset.view === String(n));
+  }
+  for (const b of document.querySelectorAll('.view-toggle button')) {
+    b.classList.toggle('active', b.dataset.view === String(n));
+  }
+}
 """
 
 
-def build_html(scenarios: list[str], rates, agree, corr, linkage, deco,
+def build_html(scenarios: list[str], rates, agree, corr,
                results_path: Path, model: str,
                n_complete: int, unanimous_dropped: int,
                axis: str, display_labels: list[str]) -> str:
@@ -545,7 +375,8 @@ def build_html(scenarios: list[str], rates, agree, corr, linkage, deco,
     parts.append(f"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
 <title>Variant trends — {esc(axis_title)}</title>
-<style>{CSS}</style></head><body>""")
+<style>{CSS}</style>
+<script>{JS}</script></head><body>""")
     parts.append(f"<h1>Variant trend analysis &mdash; {esc(axis_title)}</h1>")
     filter_note = (
         f"{unanimous_dropped} unanimous-consensus scenarios dropped"
@@ -559,7 +390,17 @@ def build_html(scenarios: list[str], rates, agree, corr, linkage, deco,
         f'({esc(filter_note)})</div>'
     )
 
+    parts.append(
+        '<div class="view-toggle">'
+        '<button type="button" class="active" data-view="1" '
+        'onclick="showView(1, this)">1. Pairwise agreement</button>'
+        '<button type="button" data-view="2" '
+        'onclick="showView(2, this)">2. Spearman correlation</button>'
+        '</div>'
+    )
+
     # Method 1
+    parts.append('<section class="view active" data-view="1">')
     parts.append("<h2>1. Pairwise agreement matrix</h2>")
     parts.append(
         '<div class="note">'
@@ -600,8 +441,10 @@ def build_html(scenarios: list[str], rates, agree, corr, linkage, deco,
         '</div>'
     )
     parts.append(render_matrix(agree, display_labels, hsl_for_agreement))
+    parts.append("</section>")
 
     # Method 2
+    parts.append('<section class="view" data-view="2">')
     parts.append("<h2>2. Spearman rank correlation</h2>")
     parts.append(
         '<div class="note">'
@@ -649,110 +492,7 @@ def build_html(scenarios: list[str], rates, agree, corr, linkage, deco,
         '</div>'
     )
     parts.append(render_matrix(corr, display_labels, hsl_for_corr))
-
-    # Method 3
-    parts.append("<h2>3. Hierarchical clustering dendrogram</h2>")
-    parts.append(
-        '<div class="note">'
-        "<p><strong>What this shows:</strong> A tree built by repeatedly "
-        "merging the closest pair of variants. The tree&rsquo;s structure "
-        "reveals natural demographic blocs at any chosen similarity "
-        "threshold.</p>"
-        "<p><strong>How it&rsquo;s computed:</strong></p>"
-        "<ul>"
-        "<li>Define distance(<em>v<sub>i</sub></em>, <em>v<sub>j</sub></em>) "
-        "= 1 &minus; Spearman &rho;(<em>v<sub>i</sub></em>, "
-        "<em>v<sub>j</sub></em>). Variants with &rho; = +1 are at distance "
-        "0; with &rho; = 0, distance 1; with &rho; = &minus;1, distance 2.</li>"
-        f"<li>Start with {n} singleton clusters (one per variant).</li>"
-        "<li>Find the two closest clusters and merge them; record the "
-        "merge height (the distance at which they joined).</li>"
-        "<li>Repeat until one cluster remains.</li>"
-        "<li>Distance between two clusters uses <em>average linkage</em>: "
-        "<em>d</em>(A, B) is the mean of all leaf-to-leaf distances "
-        "<em>d</em>(a, b) where a &isin; A and b &isin; B.</li>"
-        "<li>After merging A and B into C, update <em>d</em>(C, X) for "
-        "every other cluster X via the Lance&ndash;Williams update: "
-        "<em>d</em>(C, X) = (|A|&middot;<em>d</em>(A, X) + |B|&middot;"
-        "<em>d</em>(B, X)) &divide; (|A| + |B|).</li>"
-        "</ul>"
-        "<p><strong>How to read it:</strong></p>"
-        "<ul>"
-        "<li><em>X-axis</em>: leaves in the order produced by a depth-first "
-        "traversal of the tree, so related variants end up adjacent.</li>"
-        "<li><em>Y-axis</em>: merge distance. A horizontal bar at height "
-        "<em>h</em> means &ldquo;at distance threshold <em>h</em>, the "
-        "subtrees below merge into one cluster.&rdquo;</li>"
-        "<li>Cut the tree at any horizontal height to read off a flat "
-        "partition. Lower cuts &rarr; more, tighter clusters; higher cuts "
-        "&rarr; fewer, looser ones.</li>"
-        "<li>The first few merges (low on the y-axis) identify the "
-        "model&rsquo;s tightest demographic groupings; the last few merges "
-        "(high up) tell you which variants resist clustering with the "
-        "others.</li>"
-        "</ul>"
-        "</div>"
-    )
-    parts.append(dendrogram_svg(linkage, display_labels, width=1100, height=520))
-
-    # Method 4 — race-vs-income decomposition only applies to the crossed view.
-    if axis == "both" and deco is not None:
-        parts.append("<h2>4. Race-vs-income decomposition</h2>")
-        parts.append(
-            '<div class="note">'
-            "<p><strong>What this shows:</strong> A single-axis summary "
-            "answering &ldquo;is the model&rsquo;s variation primarily "
-            "race-shaped or income-shaped?&rdquo;</p>"
-            "<p><strong>How it&rsquo;s computed:</strong></p>"
-            "<ul>"
-            "<li>Enumerate all 15 &middot; 14 / 2 = 105 unordered pairs of "
-            "variants.</li>"
-            "<li>Classify each pair by what its two members share:"
-            "<ul>"
-            f"<li><em>Same race, different income</em>: 5 races &times; "
-            f"C(3, 2) = <strong>{deco['n_same_race']}</strong> pairs.</li>"
-            f"<li><em>Same income, different race</em>: 3 incomes &times; "
-            f"C(5, 2) = <strong>{deco['n_same_income']}</strong> pairs.</li>"
-            f"<li><em>Different race AND different income</em>: "
-            f"<strong>{deco['n_different']}</strong> pairs (the remainder).</li>"
-            "</ul></li>"
-            "<li>For each group, compute the mean of "
-            "distance(<em>v<sub>i</sub></em>, <em>v<sub>j</sub></em>) = "
-            "1 &minus; Spearman &rho;.</li>"
-            "</ul>"
-            "<p><strong>How to read it:</strong> The group with the smallest "
-            "mean distance is the tightest cluster. If same-race pairs are "
-            "tighter than same-income pairs, the model&rsquo;s variation lives "
-            "mostly along the race axis &mdash; variants sharing a race answer "
-            "more similarly than variants sharing an income. The ratio in the "
-            "verdict line below the three cells tells you whether the dominance "
-            "is strong (ratio &raquo; 1) or marginal (ratio near 1).</p>"
-            "</div>"
-        )
-        parts.append('<div class="deco">')
-        for key, label in (
-            ("same_race", "Same race, different income"),
-            ("same_income", "Same income, different race"),
-            ("different", "Different race AND income"),
-        ):
-            parts.append(
-                f'<div class="cell"><div class="num">{deco[key]:.3f}</div>'
-                f'<div class="lbl">{esc(label)}</div></div>'
-            )
-        parts.append("</div>")
-
-        # One-line verdict.
-        sr, si = deco["same_race"], deco["same_income"]
-        if not math.isnan(sr) and not math.isnan(si) and sr != si:
-            if sr < si:
-                ratio = si / sr if sr > 0 else float("inf")
-                verdict = (f"<strong>Race dominates:</strong> same-race pairs are "
-                           f"{ratio:.2f}× tighter than same-income pairs.")
-            else:
-                ratio = sr / si if si > 0 else float("inf")
-                verdict = (f"<strong>Income dominates:</strong> same-income pairs are "
-                           f"{ratio:.2f}× tighter than same-race pairs.")
-            parts.append(f'<div class="note">{verdict}</div>')
+    parts.append("</section>")
 
     parts.append("</body></html>")
     return "\n".join(parts)
@@ -818,12 +558,8 @@ def main() -> None:
             (r.get("model", "") for r in csv.DictReader(f) if r.get("model")), ""
         )
 
-    n_var = len(variant_keys)
     agree = agreement_matrix(scenarios, rates, variant_keys)
     corr = spearman_matrix(scenarios, rates, variant_keys)
-    distance = [[1 - corr[i][j] for j in range(n_var)] for i in range(n_var)]
-    linkage = average_linkage(distance)
-    deco = decomposition(distance) if args.axis == "both" else None
 
     requested = Path(args.output) if args.output else default_output_path(model, args.axis)
     output_path = resolve_non_clobbering(requested)
@@ -831,13 +567,12 @@ def main() -> None:
         print(f"warning: {requested} exists; writing to {output_path} instead",
               file=sys.stderr)
 
-    html = build_html(scenarios, rates, agree, corr, linkage, deco,
+    html = build_html(scenarios, rates, agree, corr,
                       results_path, model, n_complete, unanimous_count,
                       args.axis, display_labels)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(html, encoding="utf-8")
-    n_methods = 4 if args.axis == "both" else 3
-    print(f"wrote {n_methods}-method trend report (axis={args.axis}, "
+    print(f"wrote trend report (axis={args.axis}, "
           f"{len(scenarios)} scenarios) to {output_path}",
           file=sys.stderr)
 
