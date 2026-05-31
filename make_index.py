@@ -13,6 +13,8 @@ import html as _html
 import re
 from pathlib import Path
 
+from report_previews import preview_for
+
 REPORTS_DIR = Path(__file__).resolve().parent / "reports"
 
 # (prefix, section title, one-line description, collapse_default)
@@ -179,6 +181,21 @@ ul.report-list .fname {
   font-family: var(--mono);
   margin-left: auto; padding-left: 12px;
 }
+.preview-wrap {
+  display: inline-flex; align-items: center; gap: 3px;
+  flex-shrink: 0; line-height: 0;
+  border: 1px solid var(--rule); border-radius: 3px;
+  background: #fff; padding: 2px;
+}
+.preview-wrap.preview-pair { gap: 4px; padding: 2px 3px; }
+.preview-wrap svg { display: block; }
+.preview-missing {
+  display: inline-block; width: 55px; height: 33px;
+  background: repeating-linear-gradient(
+    45deg, #f3f3f3, #f3f3f3 4px, #fafafa 4px, #fafafa 8px);
+  border: 1px solid var(--rule); border-radius: 3px;
+  flex-shrink: 0;
+}
 footer.page {
   margin-top: 36px; padding-top: 16px;
   border-top: 1px solid var(--rule);
@@ -203,8 +220,10 @@ def render_section(title: str, desc: str, prefix: str,
     items = []
     for name in names:
         label = humanize(name, prefix) if prefix else name
+        preview = preview_for(REPORTS_DIR / name) or '<span class="preview-missing"></span>'
         items.append(
-            f'<li><a href="{esc(name)}">{esc(label)}</a>'
+            f'<li>{preview}'
+            f'<a href="{esc(name)}">{esc(label)}</a>'
             f'<span class="fname">{esc(name)}</span></li>'
         )
     head_block = (
