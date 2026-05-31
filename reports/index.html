@@ -1,103 +1,144 @@
 <!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
 <title>510 final project — report index</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
-body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-       max-width: 980px; margin: 1.5em auto; padding: 0 1em; color: #222;
-       line-height: 1.45; }
-h1 { font-size: 1.7em; margin-bottom: 0.2em; }
-.intro { color: #555; font-size: 0.95em; margin-bottom: 1.5em; }
-.intro code { background: #f0f0f0; padding: 0 4px; border-radius: 3px; }
-h2 { font-size: 1.15em; margin-top: 1.8em; padding-bottom: 4px;
-     border-bottom: 1px solid #ddd; }
-.note { color: #666; font-size: 0.9em; margin: 0.1em 0 0.8em 0; }
-ul.report-list { list-style: none; padding: 0; margin: 0; }
-ul.report-list li { padding: 4px 0; border-bottom: 1px dotted #eee; }
-ul.report-list li:last-child { border-bottom: none; }
-ul.report-list a { color: #1a4a8a; text-decoration: none; }
+:root {
+  --bg: #fafafa;
+  --card: #ffffff;
+  --ink: #1a1a1a;
+  --ink-soft: #444;
+  --ink-mute: #707070;
+  --rule: #e3e3e3;
+  --accent: #1a4a8a;
+  --accent-soft: #eaf0fb;
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+}
+* { box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  max-width: 1080px; margin: 0 auto; padding: 36px 24px 80px;
+  color: var(--ink); background: var(--bg);
+  line-height: 1.55;
+}
+header.page {
+  border-bottom: 1px solid var(--rule);
+  padding-bottom: 18px;
+  margin-bottom: 26px;
+}
+header.page h1 {
+  font-size: 2em; margin: 0 0 6px 0; letter-spacing: -0.01em;
+}
+header.page .subtitle {
+  color: var(--ink-mute); font-size: 1.02em;
+  max-width: 64ch;
+}
+header.page code { background: #f0f0f0; padding: 1px 6px;
+                    border-radius: 4px; font-family: var(--mono);
+                    font-size: 0.9em; }
+
+.stats {
+  display: flex; flex-wrap: wrap; gap: 22px;
+  background: var(--card); border: 1px solid var(--rule);
+  border-radius: 8px; padding: 14px 18px; margin: 0 0 28px 0;
+}
+.stats .stat-num {
+  font-size: 1.5em; font-weight: 700; color: var(--accent);
+  font-variant-numeric: tabular-nums; line-height: 1.1;
+}
+.stats .stat-lbl {
+  font-size: 0.82em; color: var(--ink-mute);
+  text-transform: uppercase; letter-spacing: 0.04em;
+  margin-top: 2px;
+}
+
+section.group {
+  background: var(--card); border: 1px solid var(--rule);
+  border-radius: 8px; margin: 0 0 18px 0; overflow: hidden;
+}
+section.group > summary, section.group > .group-head {
+  display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+  padding: 14px 20px; cursor: default;
+  background: linear-gradient(180deg, #f7f9fc 0%, #ffffff 100%);
+  border-bottom: 1px solid var(--rule);
+}
+details.group > summary {
+  cursor: pointer; list-style: none;
+}
+details.group > summary::-webkit-details-marker { display: none; }
+details.group > summary::before {
+  content: "▸"; color: var(--ink-mute); display: inline-block;
+  width: 14px; transition: transform 0.15s ease;
+  font-size: 0.95em;
+}
+details.group[open] > summary::before { transform: rotate(90deg); }
+
+section.group h2, details.group summary h2 {
+  font-size: 1.1em; margin: 0; color: var(--ink);
+  font-weight: 600;
+}
+.count-pill {
+  display: inline-block; padding: 2px 9px; border-radius: 999px;
+  background: var(--accent-soft); color: var(--accent);
+  font-size: 0.8em; font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.group-desc {
+  width: 100%; color: var(--ink-mute); font-size: 0.9em;
+  margin-top: 2px; line-height: 1.5;
+}
+ul.report-list {
+  list-style: none; padding: 8px 8px 12px 8px; margin: 0;
+}
+ul.report-list li {
+  padding: 7px 12px; border-radius: 6px;
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px;
+  transition: background 0.1s ease;
+}
+ul.report-list li:hover { background: var(--accent-soft); }
+ul.report-list a {
+  color: var(--accent); text-decoration: none; font-weight: 500;
+  font-size: 0.98em;
+}
 ul.report-list a:hover { text-decoration: underline; }
-.fname { color: #888; font-size: 0.82em; font-family: ui-monospace,
-         "SF Mono", Menlo, monospace; margin-left: 8px; }
-.count { color: #888; font-size: 0.85em; font-weight: normal;
-         margin-left: 6px; }
+ul.report-list .fname {
+  color: var(--ink-mute); font-size: 0.78em;
+  font-family: var(--mono);
+  margin-left: auto; padding-left: 12px;
+}
+footer.page {
+  margin-top: 36px; padding-top: 16px;
+  border-top: 1px solid var(--rule);
+  color: var(--ink-mute); font-size: 0.85em;
+}
+footer.page code { font-family: var(--mono); background: #f0f0f0;
+                    padding: 1px 5px; border-radius: 3px; }
+
+@media (max-width: 640px) {
+  body { padding: 20px 14px 60px; }
+  header.page h1 { font-size: 1.55em; }
+  ul.report-list .fname { display: none; }
+  ul.report-list li { padding: 8px 10px; }
+}
 </style></head><body>
+<header class="page">
 <h1>510 final project — report index</h1>
-<div class="intro">
-Master landing page for HTML reports under <code>reports/</code>.
-Generated by <code>make_index.py</code>; re-run after producing any new
-report to refresh the index.
+<div class="subtitle">
+Generated reports for the moral-scenario demographic-bias study. Reports
+live under <code>reports/</code> and are grouped here by type. Long
+sections (scenario pairs, single scenarios) are collapsed by default.
 </div>
-<h2>Consensus summaries <span class="count">(1)</span></h2>
-<div class="note">Per-model internal consensus vs non-consensus and cross-model agreement on consensus scenarios.</div>
-<ul class="report-list">
-<li><a href="consensus_summary_claude-haiku-4-5-20251001_vs_gpt-4o-mini.html">claude-haiku-4-5-20251001 vs gpt-4o-mini</a><span class="fname">consensus_summary_claude-haiku-4-5-20251001_vs_gpt-4o-mini.html</span></li>
-</ul>
-<h2>Cross-model galleries <span class="count">(1)</span></h2>
-<div class="note">Side-by-side 5×3 heatmaps for scenarios where either model is internally contested or the two models disagree on verdict, with paired per-cell explanations.</div>
-<ul class="report-list">
-<li><a href="cross_model_claude-haiku-4-5-20251001_vs_gpt-4o-mini.html">claude-haiku-4-5-20251001 vs gpt-4o-mini</a><span class="fname">cross_model_claude-haiku-4-5-20251001_vs_gpt-4o-mini.html</span></li>
-</ul>
-<h2>Contested-scenario galleries (single model) <span class="count">(3)</span></h2>
-<div class="note">5×3 heatmap per contested scenario for one model, with per-cell explanation tables.</div>
-<ul class="report-list">
-<li><a href="contested_gallery_gpt-4o-mini.html">gpt-4o-mini</a><span class="fname">contested_gallery_gpt-4o-mini.html</span></li>
-<li><a href="contested_gallery_haiku_500scenarios.html">haiku 500scenarios</a><span class="fname">contested_gallery_haiku_500scenarios.html</span></li>
-<li><a href="contested_gallery_haiku_explain-yes.html">haiku · explain-yes</a><span class="fname">contested_gallery_haiku_explain-yes.html</span></li>
-</ul>
-<h2>Variant trend (15×15 similarity) reports <span class="count">(4)</span></h2>
-<div class="note">Pairwise-agreement and Spearman-correlation matrices across the 15 race × income variants. Toggle plots 1 and 2 in the header.</div>
-<ul class="report-list">
-<li><a href="variant_trends_claude-haiku-4-5-20251001.html">claude-haiku-4-5-20251001</a><span class="fname">variant_trends_claude-haiku-4-5-20251001.html</span></li>
-<li><a href="variant_trends_claude-haiku-4-5-20251001_axis-income.html">claude-haiku-4-5-20251001 · axis=income</a><span class="fname">variant_trends_claude-haiku-4-5-20251001_axis-income.html</span></li>
-<li><a href="variant_trends_claude-haiku-4-5-20251001_axis-race.html">claude-haiku-4-5-20251001 · axis=race</a><span class="fname">variant_trends_claude-haiku-4-5-20251001_axis-race.html</span></li>
-<li><a href="variant_trends_gpt-4o-mini.html">gpt-4o-mini</a><span class="fname">variant_trends_gpt-4o-mini.html</span></li>
-</ul>
-<h2>Misalignment-from-consensus reports <span class="count">(2)</span></h2>
-<div class="note">Per-group leave-one-out distance from the consensus yes-rate, ranked by signed bias.</div>
-<ul class="report-list">
-<li><a href="misalignment_claude-haiku-4-5-20251001.html">claude-haiku-4-5-20251001</a><span class="fname">misalignment_claude-haiku-4-5-20251001.html</span></li>
-<li><a href="misalignment_gpt-4o-mini.html">gpt-4o-mini</a><span class="fname">misalignment_gpt-4o-mini.html</span></li>
-</ul>
-<h2>Scenario-pair comparisons <span class="count">(28)</span></h2>
-<div class="note">Two related scenarios viewed side-by-side.</div>
-<ul class="report-list">
-<li><a href="scenario_pair_claude-haiku-4-5-20251001_00009-00010.html">claude-haiku-4-5-20251001 · scenarios 00009–00010</a><span class="fname">scenario_pair_claude-haiku-4-5-20251001_00009-00010.html</span></li>
-<li><a href="scenario_pair_claude-haiku-4-5-20251001_00013-00014.html">claude-haiku-4-5-20251001 · scenarios 00013–00014</a><span class="fname">scenario_pair_claude-haiku-4-5-20251001_00013-00014.html</span></li>
-<li><a href="scenario_pair_claude-haiku-4-5-20251001_00031-00032.html">claude-haiku-4-5-20251001 · scenarios 00031–00032</a><span class="fname">scenario_pair_claude-haiku-4-5-20251001_00031-00032.html</span></li>
-<li><a href="scenario_pair_claude-haiku-4-5-20251001_00037-00038.html">claude-haiku-4-5-20251001 · scenarios 00037–00038</a><span class="fname">scenario_pair_claude-haiku-4-5-20251001_00037-00038.html</span></li>
-<li><a href="scenario_pair_claude-haiku-4-5-20251001_00071-00072.html">claude-haiku-4-5-20251001 · scenarios 00071–00072</a><span class="fname">scenario_pair_claude-haiku-4-5-20251001_00071-00072.html</span></li>
-<li><a href="scenario_pair_claude-haiku-4-5-20251001_00075-00076.html">claude-haiku-4-5-20251001 · scenarios 00075–00076</a><span class="fname">scenario_pair_claude-haiku-4-5-20251001_00075-00076.html</span></li>
-<li><a href="scenario_pair_claude-haiku-4-5-20251001_00099-00100.html">claude-haiku-4-5-20251001 · scenarios 00099–00100</a><span class="fname">scenario_pair_claude-haiku-4-5-20251001_00099-00100.html</span></li>
-<li><a href="scenario_pair_claude-haiku-4-5-20251001_00101-00102.html">claude-haiku-4-5-20251001 · scenarios 00101–00102</a><span class="fname">scenario_pair_claude-haiku-4-5-20251001_00101-00102.html</span></li>
-<li><a href="scenario_pair_claude-haiku-4-5-20251001_00111-00112.html">claude-haiku-4-5-20251001 · scenarios 00111–00112</a><span class="fname">scenario_pair_claude-haiku-4-5-20251001_00111-00112.html</span></li>
-<li><a href="scenario_pair_claude-haiku-4-5-20251001_00113-00114.html">claude-haiku-4-5-20251001 · scenarios 00113–00114</a><span class="fname">scenario_pair_claude-haiku-4-5-20251001_00113-00114.html</span></li>
-<li><a href="scenario_pair_claude-haiku-4-5-20251001_00115-00116.html">claude-haiku-4-5-20251001 · scenarios 00115–00116</a><span class="fname">scenario_pair_claude-haiku-4-5-20251001_00115-00116.html</span></li>
-<li><a href="scenario_pair_claude-haiku-4-5-20251001_00193-00194.html">claude-haiku-4-5-20251001 · scenarios 00193–00194</a><span class="fname">scenario_pair_claude-haiku-4-5-20251001_00193-00194.html</span></li>
-<li><a href="scenario_pair_claude-haiku-4-5-20251001_00217-00218.html">claude-haiku-4-5-20251001 · scenarios 00217–00218</a><span class="fname">scenario_pair_claude-haiku-4-5-20251001_00217-00218.html</span></li>
-<li><a href="scenario_pair_claude-haiku-4-5-20251001_00221-00222.html">claude-haiku-4-5-20251001 · scenarios 00221–00222</a><span class="fname">scenario_pair_claude-haiku-4-5-20251001_00221-00222.html</span></li>
-<li><a href="scenario_pair_claude-haiku-4-5-20251001_00277-00278.html">claude-haiku-4-5-20251001 · scenarios 00277–00278</a><span class="fname">scenario_pair_claude-haiku-4-5-20251001_00277-00278.html</span></li>
-<li><a href="scenario_pair_gpt-4o-mini_00015-00016.html">gpt-4o-mini · scenarios 00015–00016</a><span class="fname">scenario_pair_gpt-4o-mini_00015-00016.html</span></li>
-<li><a href="scenario_pair_gpt-4o-mini_00035-00036.html">gpt-4o-mini · scenarios 00035–00036</a><span class="fname">scenario_pair_gpt-4o-mini_00035-00036.html</span></li>
-<li><a href="scenario_pair_gpt-4o-mini_00037-00038.html">gpt-4o-mini · scenarios 00037–00038</a><span class="fname">scenario_pair_gpt-4o-mini_00037-00038.html</span></li>
-<li><a href="scenario_pair_gpt-4o-mini_00049-00050.html">gpt-4o-mini · scenarios 00049–00050</a><span class="fname">scenario_pair_gpt-4o-mini_00049-00050.html</span></li>
-<li><a href="scenario_pair_gpt-4o-mini_00077-00078.html">gpt-4o-mini · scenarios 00077–00078</a><span class="fname">scenario_pair_gpt-4o-mini_00077-00078.html</span></li>
-<li><a href="scenario_pair_gpt-4o-mini_00093-00094.html">gpt-4o-mini · scenarios 00093–00094</a><span class="fname">scenario_pair_gpt-4o-mini_00093-00094.html</span></li>
-<li><a href="scenario_pair_gpt-4o-mini_00097-00098.html">gpt-4o-mini · scenarios 00097–00098</a><span class="fname">scenario_pair_gpt-4o-mini_00097-00098.html</span></li>
-<li><a href="scenario_pair_gpt-4o-mini_00107-00108.html">gpt-4o-mini · scenarios 00107–00108</a><span class="fname">scenario_pair_gpt-4o-mini_00107-00108.html</span></li>
-<li><a href="scenario_pair_gpt-4o-mini_00117-00118.html">gpt-4o-mini · scenarios 00117–00118</a><span class="fname">scenario_pair_gpt-4o-mini_00117-00118.html</span></li>
-<li><a href="scenario_pair_gpt-4o-mini_00119-00120.html">gpt-4o-mini · scenarios 00119–00120</a><span class="fname">scenario_pair_gpt-4o-mini_00119-00120.html</span></li>
-<li><a href="scenario_pair_gpt-4o-mini_00159-00160.html">gpt-4o-mini · scenarios 00159–00160</a><span class="fname">scenario_pair_gpt-4o-mini_00159-00160.html</span></li>
-<li><a href="scenario_pair_gpt-4o-mini_00239-00240.html">gpt-4o-mini · scenarios 00239–00240</a><span class="fname">scenario_pair_gpt-4o-mini_00239-00240.html</span></li>
-<li><a href="scenario_pair_gpt-4o-mini_00291-00292.html">gpt-4o-mini · scenarios 00291–00292</a><span class="fname">scenario_pair_gpt-4o-mini_00291-00292.html</span></li>
-</ul>
-<h2>Single-scenario reports <span class="count">(6)</span></h2>
-<div class="note">Detail report for a single scenario.</div>
-<ul class="report-list">
-<li><a href="scenario_report_1.html">1</a><span class="fname">scenario_report_1.html</span></li>
-<li><a href="scenario_report_2.html">2</a><span class="fname">scenario_report_2.html</span></li>
-<li><a href="scenario_report_4.html">4</a><span class="fname">scenario_report_4.html</span></li>
-<li><a href="scenario_report_5.html">5</a><span class="fname">scenario_report_5.html</span></li>
-<li><a href="scenario_report_claude-haiku-4-5-20251001_00015-00016.html">claude-haiku-4-5-20251001 · scenarios 00015–00016</a><span class="fname">scenario_report_claude-haiku-4-5-20251001_00015-00016.html</span></li>
-<li><a href="scenario_report_claude-haiku-4-5-20251001_00222.html">claude-haiku-4-5-20251001 00222</a><span class="fname">scenario_report_claude-haiku-4-5-20251001_00222.html</span></li>
-</ul>
-</body></html>
+</header>
+<div class="stats">
+<div><div class="stat-num">44</div><div class="stat-lbl">total reports</div></div>
+<div><div class="stat-num">7</div><div class="stat-lbl">sections</div></div>
+</div>
+
+<section class="group"><div class="group-head"><h2>Consensus summaries</h2><span class="count-pill">1</span><div class="group-desc">Per-model internal consensus vs non-consensus and cross-model agreement on consensus scenarios.</div></div><ul class="report-list"><li><a href="consensus_summary_claude-haiku-4-5-20251001_vs_gpt-4o-mini.html">claude-haiku-4-5-20251001 vs gpt-4o-mini</a><span class="fname">consensus_summary_claude-haiku-4-5-20251001_vs_gpt-4o-mini.html</span></li></ul></section>
+<section class="group"><div class="group-head"><h2>Cross-model galleries</h2><span class="count-pill">1</span><div class="group-desc">Side-by-side 5×3 heatmaps for scenarios where either model is internally contested or the two models disagree on verdict, with paired per-cell explanations.</div></div><ul class="report-list"><li><a href="cross_model_claude-haiku-4-5-20251001_vs_gpt-4o-mini.html">claude-haiku-4-5-20251001 vs gpt-4o-mini</a><span class="fname">cross_model_claude-haiku-4-5-20251001_vs_gpt-4o-mini.html</span></li></ul></section>
+<section class="group"><div class="group-head"><h2>Contested-scenario galleries (single model)</h2><span class="count-pill">3</span><div class="group-desc">5×3 heatmap per contested scenario for one model, with per-cell explanation tables.</div></div><ul class="report-list"><li><a href="contested_gallery_gpt-4o-mini.html">gpt-4o-mini</a><span class="fname">contested_gallery_gpt-4o-mini.html</span></li><li><a href="contested_gallery_haiku_500scenarios.html">haiku 500scenarios</a><span class="fname">contested_gallery_haiku_500scenarios.html</span></li><li><a href="contested_gallery_haiku_explain-yes.html">haiku · explain-yes</a><span class="fname">contested_gallery_haiku_explain-yes.html</span></li></ul></section>
+<section class="group"><div class="group-head"><h2>Variant trend (similarity) reports</h2><span class="count-pill">3</span><div class="group-desc">Pairwise-agreement and Spearman-correlation matrices across the 15 race × income variants. Side-by-side panels when two models are compared. Toggle between plots 1 and 2 in the header.</div></div><ul class="report-list"><li><a href="variant_trends_claude-haiku-4-5-20251001_axis-income.html">claude-haiku-4-5-20251001 · axis=income</a><span class="fname">variant_trends_claude-haiku-4-5-20251001_axis-income.html</span></li><li><a href="variant_trends_claude-haiku-4-5-20251001_axis-race.html">claude-haiku-4-5-20251001 · axis=race</a><span class="fname">variant_trends_claude-haiku-4-5-20251001_axis-race.html</span></li><li><a href="variant_trends_claude-haiku-4-5-20251001_vs_gpt-4o-mini.html">claude-haiku-4-5-20251001 vs gpt-4o-mini</a><span class="fname">variant_trends_claude-haiku-4-5-20251001_vs_gpt-4o-mini.html</span></li></ul></section>
+<section class="group"><div class="group-head"><h2>Misalignment-from-consensus reports</h2><span class="count-pill">2</span><div class="group-desc">Per-group leave-one-out distance from the consensus yes-rate, ranked by signed bias.</div></div><ul class="report-list"><li><a href="misalignment_claude-haiku-4-5-20251001.html">claude-haiku-4-5-20251001</a><span class="fname">misalignment_claude-haiku-4-5-20251001.html</span></li><li><a href="misalignment_gpt-4o-mini.html">gpt-4o-mini</a><span class="fname">misalignment_gpt-4o-mini.html</span></li></ul></section>
+<details class="group" ><summary><h2>Scenario-pair comparisons</h2><span class="count-pill">28</span><div class="group-desc">Two related scenarios viewed side-by-side.</div></summary><ul class="report-list"><li><a href="scenario_pair_claude-haiku-4-5-20251001_00009-00010.html">claude-haiku-4-5-20251001 · scenarios 00009–00010</a><span class="fname">scenario_pair_claude-haiku-4-5-20251001_00009-00010.html</span></li><li><a href="scenario_pair_claude-haiku-4-5-20251001_00013-00014.html">claude-haiku-4-5-20251001 · scenarios 00013–00014</a><span class="fname">scenario_pair_claude-haiku-4-5-20251001_00013-00014.html</span></li><li><a href="scenario_pair_claude-haiku-4-5-20251001_00031-00032.html">claude-haiku-4-5-20251001 · scenarios 00031–00032</a><span class="fname">scenario_pair_claude-haiku-4-5-20251001_00031-00032.html</span></li><li><a href="scenario_pair_claude-haiku-4-5-20251001_00037-00038.html">claude-haiku-4-5-20251001 · scenarios 00037–00038</a><span class="fname">scenario_pair_claude-haiku-4-5-20251001_00037-00038.html</span></li><li><a href="scenario_pair_claude-haiku-4-5-20251001_00071-00072.html">claude-haiku-4-5-20251001 · scenarios 00071–00072</a><span class="fname">scenario_pair_claude-haiku-4-5-20251001_00071-00072.html</span></li><li><a href="scenario_pair_claude-haiku-4-5-20251001_00075-00076.html">claude-haiku-4-5-20251001 · scenarios 00075–00076</a><span class="fname">scenario_pair_claude-haiku-4-5-20251001_00075-00076.html</span></li><li><a href="scenario_pair_claude-haiku-4-5-20251001_00099-00100.html">claude-haiku-4-5-20251001 · scenarios 00099–00100</a><span class="fname">scenario_pair_claude-haiku-4-5-20251001_00099-00100.html</span></li><li><a href="scenario_pair_claude-haiku-4-5-20251001_00101-00102.html">claude-haiku-4-5-20251001 · scenarios 00101–00102</a><span class="fname">scenario_pair_claude-haiku-4-5-20251001_00101-00102.html</span></li><li><a href="scenario_pair_claude-haiku-4-5-20251001_00111-00112.html">claude-haiku-4-5-20251001 · scenarios 00111–00112</a><span class="fname">scenario_pair_claude-haiku-4-5-20251001_00111-00112.html</span></li><li><a href="scenario_pair_claude-haiku-4-5-20251001_00113-00114.html">claude-haiku-4-5-20251001 · scenarios 00113–00114</a><span class="fname">scenario_pair_claude-haiku-4-5-20251001_00113-00114.html</span></li><li><a href="scenario_pair_claude-haiku-4-5-20251001_00115-00116.html">claude-haiku-4-5-20251001 · scenarios 00115–00116</a><span class="fname">scenario_pair_claude-haiku-4-5-20251001_00115-00116.html</span></li><li><a href="scenario_pair_claude-haiku-4-5-20251001_00193-00194.html">claude-haiku-4-5-20251001 · scenarios 00193–00194</a><span class="fname">scenario_pair_claude-haiku-4-5-20251001_00193-00194.html</span></li><li><a href="scenario_pair_claude-haiku-4-5-20251001_00217-00218.html">claude-haiku-4-5-20251001 · scenarios 00217–00218</a><span class="fname">scenario_pair_claude-haiku-4-5-20251001_00217-00218.html</span></li><li><a href="scenario_pair_claude-haiku-4-5-20251001_00221-00222.html">claude-haiku-4-5-20251001 · scenarios 00221–00222</a><span class="fname">scenario_pair_claude-haiku-4-5-20251001_00221-00222.html</span></li><li><a href="scenario_pair_claude-haiku-4-5-20251001_00277-00278.html">claude-haiku-4-5-20251001 · scenarios 00277–00278</a><span class="fname">scenario_pair_claude-haiku-4-5-20251001_00277-00278.html</span></li><li><a href="scenario_pair_gpt-4o-mini_00015-00016.html">gpt-4o-mini · scenarios 00015–00016</a><span class="fname">scenario_pair_gpt-4o-mini_00015-00016.html</span></li><li><a href="scenario_pair_gpt-4o-mini_00035-00036.html">gpt-4o-mini · scenarios 00035–00036</a><span class="fname">scenario_pair_gpt-4o-mini_00035-00036.html</span></li><li><a href="scenario_pair_gpt-4o-mini_00037-00038.html">gpt-4o-mini · scenarios 00037–00038</a><span class="fname">scenario_pair_gpt-4o-mini_00037-00038.html</span></li><li><a href="scenario_pair_gpt-4o-mini_00049-00050.html">gpt-4o-mini · scenarios 00049–00050</a><span class="fname">scenario_pair_gpt-4o-mini_00049-00050.html</span></li><li><a href="scenario_pair_gpt-4o-mini_00077-00078.html">gpt-4o-mini · scenarios 00077–00078</a><span class="fname">scenario_pair_gpt-4o-mini_00077-00078.html</span></li><li><a href="scenario_pair_gpt-4o-mini_00093-00094.html">gpt-4o-mini · scenarios 00093–00094</a><span class="fname">scenario_pair_gpt-4o-mini_00093-00094.html</span></li><li><a href="scenario_pair_gpt-4o-mini_00097-00098.html">gpt-4o-mini · scenarios 00097–00098</a><span class="fname">scenario_pair_gpt-4o-mini_00097-00098.html</span></li><li><a href="scenario_pair_gpt-4o-mini_00107-00108.html">gpt-4o-mini · scenarios 00107–00108</a><span class="fname">scenario_pair_gpt-4o-mini_00107-00108.html</span></li><li><a href="scenario_pair_gpt-4o-mini_00117-00118.html">gpt-4o-mini · scenarios 00117–00118</a><span class="fname">scenario_pair_gpt-4o-mini_00117-00118.html</span></li><li><a href="scenario_pair_gpt-4o-mini_00119-00120.html">gpt-4o-mini · scenarios 00119–00120</a><span class="fname">scenario_pair_gpt-4o-mini_00119-00120.html</span></li><li><a href="scenario_pair_gpt-4o-mini_00159-00160.html">gpt-4o-mini · scenarios 00159–00160</a><span class="fname">scenario_pair_gpt-4o-mini_00159-00160.html</span></li><li><a href="scenario_pair_gpt-4o-mini_00239-00240.html">gpt-4o-mini · scenarios 00239–00240</a><span class="fname">scenario_pair_gpt-4o-mini_00239-00240.html</span></li><li><a href="scenario_pair_gpt-4o-mini_00291-00292.html">gpt-4o-mini · scenarios 00291–00292</a><span class="fname">scenario_pair_gpt-4o-mini_00291-00292.html</span></li></ul></details>
+<details class="group" ><summary><h2>Single-scenario reports</h2><span class="count-pill">6</span><div class="group-desc">Detail report for a single scenario.</div></summary><ul class="report-list"><li><a href="scenario_report_1.html">1</a><span class="fname">scenario_report_1.html</span></li><li><a href="scenario_report_2.html">2</a><span class="fname">scenario_report_2.html</span></li><li><a href="scenario_report_4.html">4</a><span class="fname">scenario_report_4.html</span></li><li><a href="scenario_report_5.html">5</a><span class="fname">scenario_report_5.html</span></li><li><a href="scenario_report_claude-haiku-4-5-20251001_00015-00016.html">claude-haiku-4-5-20251001 · scenarios 00015–00016</a><span class="fname">scenario_report_claude-haiku-4-5-20251001_00015-00016.html</span></li><li><a href="scenario_report_claude-haiku-4-5-20251001_00222.html">claude-haiku-4-5-20251001 00222</a><span class="fname">scenario_report_claude-haiku-4-5-20251001_00222.html</span></li></ul></details>
+<footer class="page">Regenerate with <code>python make_index.py</code> after producing any new report.</footer></body></html>
