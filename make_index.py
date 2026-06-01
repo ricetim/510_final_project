@@ -18,6 +18,21 @@ REPORTS_DIR = Path(__file__).resolve().parent / "reports"
 # (prefix, section title, one-line description, collapse_default)
 # Sections with many files (scenario pairs / single scenarios) collapse by
 # default to keep the page scannable.
+# Reports whose files exist on disk but should not be listed on the index.
+# Useful for hiding superseded or single-model reports without deleting
+# them from reports/.
+HIDDEN: set[str] = {
+    "variant_trends_claude-haiku-4-5-20251001_axis-income.html",
+    "variant_trends_claude-haiku-4-5-20251001_axis-race.html",
+}
+
+# Prefixes whose entire sections should be omitted from the index.
+HIDDEN_PREFIXES: tuple[str, ...] = (
+    "contested_gallery_",
+    "scenario_pair_",
+    "scenario_report_",
+)
+
 GROUPS = [
     ("consensus_summary_",
      "Consensus summaries",
@@ -30,11 +45,6 @@ GROUPS = [
      "internally contested or the two models disagree on verdict, with "
      "paired per-cell explanations.",
      False),
-    ("contested_gallery_",
-     "Contested-scenario galleries (single model)",
-     "5×3 heatmap per contested scenario for one model, with "
-     "per-cell explanation tables.",
-     False),
     ("variant_trends_",
      "Variant trend (similarity) reports",
      "Pairwise-agreement and Spearman-correlation matrices across the "
@@ -46,14 +56,6 @@ GROUPS = [
      "Per-group leave-one-out distance from the consensus yes-rate, "
      "ranked by signed bias.",
      False),
-    ("scenario_pair_",
-     "Scenario-pair comparisons",
-     "Two related scenarios viewed side-by-side.",
-     True),
-    ("scenario_report_",
-     "Single-scenario reports",
-     "Detail report for a single scenario.",
-     True),
 ]
 
 
@@ -230,7 +232,9 @@ def render_section(title: str, desc: str, prefix: str,
 
 def main() -> None:
     files = sorted(p.name for p in REPORTS_DIR.glob("*.html")
-                   if p.name != "index.html")
+                   if p.name != "index.html"
+                   and p.name not in HIDDEN
+                   and not p.name.startswith(HIDDEN_PREFIXES))
 
     sections: list[tuple[str, str, str, list[str], bool]] = []
     assigned: set[str] = set()
