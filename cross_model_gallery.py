@@ -69,15 +69,25 @@ def esc(v) -> str:
 # Multi-file yes-rate loader
 # ---------------------------------------------------------------------------
 
+MAX_REPLICATES_PER_CELL = 5
+
+
 def load_partial_yes_rates_multi(paths: list[Path]) -> tuple[list[str], dict]:
-    """Same shape as contested_gallery_report.load_partial_yes_rates but
-    accepts a list of CSVs. Yes/No replicates from every file are pooled
-    per (scenario_id, race, income) before the yes-rate ratio is computed,
-    so coverage stacks: a scenario with no Yes/No in file A but data in
-    file B becomes covered."""
-    raw: dict = defaultdict(lambda: defaultdict(list))
+    """Priority-fallback yes-rate loader across multiple CSVs.
+
+    For each (scenario_id, race, income) cell, take up to
+    MAX_REPLICATES_PER_CELL Yes/No answers from the FIRST path that has
+    any data for that cell. If that path has no Yes/No answers for the
+    cell, fall back to the next path, and so on. Sources are NOT pooled.
+
+    So `paths` is priority-ordered: pass your preferred source first
+    (e.g. explain-yes), and the explain-no CSV second as fallback.
+    Coverage still stacks — a cell missing from file A but present in
+    file B becomes covered via file B."""
+    per_path_raw: list[dict] = []
     all_sids: set[str] = set()
     for path in paths:
+        d: dict = defaultdict(lambda: defaultdict(list))
         with open(path, newline="") as f:
             for r in csv.DictReader(f):
                 if r["answer"] not in ("Yes", "No"):
@@ -85,12 +95,18 @@ def load_partial_yes_rates_multi(paths: list[Path]) -> tuple[list[str], dict]:
                 if r["race_variant"] not in RACES or r["income_variant"] not in INCOMES:
                     continue
                 v = (r["race_variant"], r["income_variant"])
-                raw[v][r["scenario_id"]].append(r["answer"])
+                d[v][r["scenario_id"]].append(r["answer"])
                 all_sids.add(r["scenario_id"])
+        per_path_raw.append(d)
     rates: dict = {v: {} for v in VARIANTS}
     for v in VARIANTS:
-        for sid, answers in raw[v].items():
-            rates[v][sid] = sum(1 for a in answers if a == "Yes") / len(answers)
+        for sid in all_sids:
+            for d in per_path_raw:
+                answers = d[v].get(sid)
+                if answers:
+                    answers = answers[:MAX_REPLICATES_PER_CELL]
+                    rates[v][sid] = sum(1 for a in answers if a == "Yes") / len(answers)
+                    break
     return sorted(all_sids), rates
 
 
